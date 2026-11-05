@@ -163,7 +163,7 @@ fn detect_crop(
 pub fn analyze(opts: &Opts, input: &Path, panel: &mut Panel) -> Result<Analysis> {
     let filename = input.file_name().unwrap().to_string_lossy().to_string();
     let stem = input.file_stem().unwrap().to_string_lossy().to_string();
-    let p = opts.paths(&stem);
+    let p = opts.paths_for(input);
 
     panel.draw_analysis(&filename, 8.0, "AUDIO / NAPISY", "Odczytuję ścieżki przez ffprobe");
     let media = probe::probe(input)?;

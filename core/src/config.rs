@@ -1,4 +1,7 @@
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Codec {
@@ -11,6 +14,29 @@ impl Codec {
         match self {
             Codec::Hevc => "hevc",
             Codec::Av1 => "av1",
+        }
+    }
+}
+
+/// Kontener pliku wynikowego: dla wejścia .mp4/.MP4 wynik też jest .mp4, w pozostałych przypadkach .mkv.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Container {
+    Mkv,
+    Mp4,
+}
+
+impl Container {
+    pub fn from_input(input: &Path) -> Self {
+        match input.extension().and_then(|e| e.to_str()) {
+            Some(e) if e.eq_ignore_ascii_case("mp4") => Container::Mp4,
+            _ => Container::Mkv,
+        }
+    }
+
+    pub fn ext(self) -> &'static str {
+        match self {
+            Container::Mkv => "mkv",
+            Container::Mp4 => "mp4",
         }
     }
 }
@@ -64,7 +90,9 @@ pub struct Runtime {
 }
 
 pub struct Paths {
-    pub output_mkv: PathBuf,
+    pub container: Container,
+    /// Gotowy plik wynikowy (.mkv albo .mp4, zależnie od pliku wejściowego).
+    pub output: PathBuf,
     pub temp_video: PathBuf,
     pub temp_pol_audio: PathBuf,
     pub temp_eng_audio: PathBuf,
@@ -98,7 +126,13 @@ impl Opts {
         }
     }
 
-    pub fn paths(&self, stem: &str) -> Paths {
+    /// Ścieżki dla pliku wejściowego (nazwa i kontener wyniku wynikają z `input`).
+    pub fn paths_for(&self, input: &Path) -> Paths {
+        let stem = input.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+        self.paths(&stem, Container::from_input(input))
+    }
+
+    fn paths(&self, stem: &str, container: Container) -> Paths {
         let cqt = self.cq_tag();
         let d = &self.output_dir;
         let mut suffix = match self.codec {
@@ -122,7 +156,8 @@ impl Opts {
             ),
         };
         Paths {
-            output_mkv: d.join(format!("{stem}{suffix}.mkv")),
+            container,
+            output: d.join(format!("{stem}{suffix}.{}", container.ext())),
             temp_video,
             temp_pol_audio: d.join(format!("{stem}_pol_192.eac3")),
             temp_eng_audio: d.join(format!("{stem}_eng.eac3")),

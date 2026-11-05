@@ -150,6 +150,12 @@ pub fn video_codec(path: &Path) -> Option<String> {
     probe_value(path, &["-select_streams", "v:0", "-show_entries", "stream=codec_name"])
 }
 
+/// Liczba klatek na sekundę pierwszego strumienia wideo, np. "24000/1001".
+pub fn video_fps(path: &Path) -> Option<String> {
+    let s = probe_value(path, &["-select_streams", "v:0", "-show_entries", "stream=r_frame_rate"])?;
+    (s != "0/0").then_some(s)
+}
+
 pub fn container_duration(path: &Path) -> Option<f64> {
     probe_value(path, &["-show_entries", "format=duration"])?.parse().ok()
 }

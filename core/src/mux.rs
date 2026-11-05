@@ -3,7 +3,7 @@ use crate::{
     config::*,
     copy,
     model::{Panel, State},
-    proc,
+    probe, proc,
 };
 use anyhow::{bail, Result};
 use std::{
@@ -30,6 +30,136 @@ fn encode_audio(input: &Path, idx: u32, bitrate: &str, channels: &str, lang: &st
     .map(|x| x.to_string())
     .collect();
     run_quiet("ffmpeg", &args)
+}
+
+/// Które strumienie źródła kopiujemy bez zmian (wspólne dla MKV i MP4).
+fn source_audio(opts: &Opts, a: &Analysis) -> Vec<u32> {
+    if let Some(pol) = a.pol_audio {
+        // Z -pleac3 polska ścieżka jest dodawana osobno jako E-AC-3.
+        if opts.pl_eac3 { vec![] } else { vec![pol] }
+    } else if let Some(first) = a.first_audio.filter(|_| !opts.extra || a.eng_audio.is_none()) {
+        // Brak ścieżki PL: zachowujemy pierwszą ścieżkę audio (żeby plik nie był niemy).
+        vec![first]
+    } else {
+        vec![]
+    }
+}
+
+/// Napisy EN i PL tylko z -da.
+fn source_subs(opts: &Opts, a: &Analysis) -> Vec<u32> {
+    if opts.extra {
+        [a.pol_sub, a.eng_sub].iter().flatten().copied().collect()
+    } else {
+        vec![]
+    }
+}
+
+fn mux_mkv(opts: &Opts, a: &Analysis, p: &Paths, current_video: &Path) -> Result<()> {
+    let mut cmd: Vec<String> = vec!["--output".into(), s(&p.output), s(current_video)];
+    let mut flags: Vec<String> = vec!["--no-video".into(), "--no-buttons".into()];
+
+    let audio = source_audio(opts, a);
+    if audio.is_empty() {
+        flags.push("--no-audio".into());
+    } else {
+        let ids: Vec<String> = audio.iter().map(|x| x.to_string()).collect();
+        flags.extend(["--audio-tracks".into(), ids.join(",")]);
+    }
+
+    let subs = source_subs(opts, a);
+    if subs.is_empty() {
+        flags.push("--no-subtitles".into());
+    } else {
+        let ids: Vec<String> = subs.iter().map(|x| x.to_string()).collect();
+        flags.extend(["--subtitle-tracks".into(), ids.join(",")]);
+    }
+
+    if !audio.is_empty() || !subs.is_empty() {
+        cmd.extend(flags);
+        cmd.push(s(&a.input_file));
+    }
+    if opts.pl_eac3 && a.pol_audio.is_some() && p.temp_pol_audio.exists() {
+        cmd.extend(["--language".into(), "0:pol".into(), s(&p.temp_pol_audio)]);
+    }
+    if opts.extra && p.temp_eng_audio.exists() {
+        cmd.extend(["--language".into(), "0:eng".into(), s(&p.temp_eng_audio)]);
+    }
+
+    // mkvmerge zwraca 1 dla samych ostrzeżeń — to nadal sukces.
+    let ok = proc::run(Command::new("mkvmerge").args(&cmd).stdin(Stdio::null())).map_or(false, |c| c <= 1);
+    if !ok {
+        bail!("błąd mkvmerge — pliki tymczasowe pozostają, kolejne uruchomienie wznowi proces");
+    }
+    Ok(())
+}
+
+/// MP4 (źródło .mp4): składanie przez ffmpeg. mkvmerge nie zapisuje MP4.
+/// Strumienie źródła są kopiowane (źródło MP4 ma już audio i napisy zgodne z MP4).
+fn mux_mp4(opts: &Opts, a: &Analysis, p: &Paths, video: &Path, dynamic_hdr: bool) -> Result<()> {
+    // Surowy strumień HEVC (po dovi_tool/hdr10plus_tool) nie ma znaczników czasu — podajemy fps ze źródła.
+    let raw_hevc = video.extension().and_then(|e| e.to_str()) == Some("hevc");
+
+    let mut args: Vec<String> = ["-hide_banner", "-loglevel", "error", "-y"].map(String::from).to_vec();
+    if raw_hevc {
+        let Some(fps) = probe::video_fps(&a.input_file) else {
+            bail!("nie można odczytać liczby klatek na sekundę ze źródła (ffprobe)");
+        };
+        args.extend(["-framerate".into(), fps, "-f".into(), "hevc".into()]);
+    }
+    args.extend(["-i".into(), s(video), "-i".into(), s(&a.input_file)]);
+
+    let mut maps: Vec<String> = vec!["-map".into(), "0:v:0".into()];
+    let mut meta: Vec<String> = vec![];
+    let mut out_audio = 0usize;
+    let mut next_input = 2usize; // 0 = wideo, 1 = źródło
+
+    for idx in source_audio(opts, a) {
+        maps.extend(["-map".into(), format!("1:{idx}")]);
+        out_audio += 1;
+    }
+    // E-AC-3 z plików tymczasowych: surowy strumień nie niesie języka, więc ustawiamy go jawnie.
+    let mut temp_audio: Vec<(&PathBuf, &str)> = vec![];
+    if opts.pl_eac3 && a.pol_audio.is_some() && p.temp_pol_audio.exists() {
+        temp_audio.push((&p.temp_pol_audio, "pol"));
+    }
+    if opts.extra && p.temp_eng_audio.exists() {
+        temp_audio.push((&p.temp_eng_audio, "eng"));
+    }
+    for (path, lang) in temp_audio {
+        args.extend(["-i".into(), s(path)]);
+        maps.extend(["-map".into(), format!("{next_input}:0")]);
+        meta.extend([format!("-metadata:s:a:{out_audio}"), format!("language={lang}")]);
+        out_audio += 1;
+        next_input += 1;
+    }
+    for idx in source_subs(opts, a) {
+        maps.extend(["-map".into(), format!("1:{idx}")]);
+    }
+
+    args.extend(maps);
+    args.extend(meta);
+    args.extend(["-map_chapters".into(), "1".into(), "-map_metadata".into(), "1".into()]);
+    args.extend(["-c".into(), "copy".into()]);
+    if opts.codec == Codec::Hevc {
+        // hvc1: zgodność z odtwarzaczami (Apple, przeglądarki, KDE).
+        args.extend(["-tag:v".into(), "hvc1".into()]);
+    }
+    args.extend(["-movflags".into(), "+faststart".into(), "-f".into(), "mp4".into()]);
+
+    // Zapis do pliku tymczasowego: przerwany mux nie może zostać uznany za gotowy wynik.
+    let part = PathBuf::from(format!("{}.part", p.output.display()));
+    let _ = fs::remove_file(&part);
+    args.push(s(&part));
+
+    if dynamic_hdr {
+        plog!("    UWAGA (MP4): RPU Dolby Vision i metadane HDR10+ zostają w strumieniu, ale ffmpeg nie zapisuje konfiguracji DV (dvcC) — część odtwarzaczy pokaże zwykły HDR10.");
+    }
+    if !run_quiet("ffmpeg", &args) {
+        let _ = fs::remove_file(&part);
+        bail!("błąd ffmpeg przy składaniu MP4 — pliki tymczasowe pozostają, kolejne uruchomienie wznowi proces");
+    }
+    fs::rename(&part, &p.output)?;
+    Ok(())
 }
 
 /// Kopiowanie do source/encoded (tylko z -c) po ukończeniu / przy resume.
@@ -59,7 +189,7 @@ fn finish_copy(opts: &Opts, a: &Analysis, output: &Path, already: bool, panel: &
 
 pub fn run(opts: &Opts, a: &Analysis, analysis_file: &Path, panel: &mut Panel) -> Result<()> {
     let name = &a.filename;
-    let p = opts.paths(&a.stem);
+    let p = opts.paths_for(&a.input_file);
     panel.set(name, State::Hdr, "");
     // Opcje wygrywają z wynikiem starej analizy (np. DV wykryte, ale teraz --no-dv).
     let use_dovi = a.has_dovi && !opts.no_dv;
@@ -68,8 +198,8 @@ pub fn run(opts: &Opts, a: &Analysis, analysis_file: &Path, panel: &mut Panel) -
         bail!("przerwano");
     }
 
-    if p.output_mkv.exists() {
-        finish_copy(opts, a, &p.output_mkv, true, panel);
+    if p.output.exists() {
+        finish_copy(opts, a, &p.output, true, panel);
         return Ok(());
     }
     plog!(" -> [{name}] Składanie pliku wynikowego ({})...", opts.codec.name());
@@ -159,60 +289,16 @@ pub fn run(opts: &Opts, a: &Analysis, analysis_file: &Path, panel: &mut Panel) -
         }
     }
 
-    // --- mkvmerge --------------------------------------------------------
-    panel.set(name, State::Mux, "Łączenie strumieni MKV");
+    // --- składanie kontenera ------------------------------------------------
+    panel.set(name, State::Mux, format!("Łączenie strumieni ({})", p.container.ext().to_uppercase()));
     panel.draw(" ETAP 3/3 — PIPELINE");
 
-    let mut cmd: Vec<String> = vec!["--output".into(), s(&p.output_mkv), s(&current_video)];
-    let mut flags: Vec<String> = vec!["--no-video".into(), "--no-buttons".into()];
-    let mut has_audio = false;
-
-    if let Some(pol) = a.pol_audio {
-        if opts.pl_eac3 {
-            flags.push("--no-audio".into()); // PL dodany osobno jako E-AC-3
-        } else {
-            flags.extend(["--audio-tracks".into(), pol.to_string()]);
-            has_audio = true;
-        }
-    } else if a.first_audio.is_some() && (!opts.extra || a.eng_audio.is_none()) {
-        // Brak ścieżki PL: zachowujemy pierwszą ścieżkę audio (żeby plik nie był niemy).
-        flags.extend(["--audio-tracks".into(), a.first_audio.unwrap().to_string()]);
-        has_audio = true;
-    } else {
-        flags.push("--no-audio".into());
+    match p.container {
+        Container::Mp4 => mux_mp4(opts, a, &p, &current_video, use_dovi || use_hdr10plus)?,
+        Container::Mkv => mux_mkv(opts, a, &p, &current_video)?,
     }
 
-    // Napisy EN i PL tylko z -da.
-    let subs: Vec<String> = if opts.extra {
-        [a.pol_sub, a.eng_sub].iter().flatten().map(|x| x.to_string()).collect()
-    } else {
-        Vec::new()
-    };
-    let has_subs = !subs.is_empty();
-    if has_subs {
-        flags.extend(["--subtitle-tracks".into(), subs.join(",")]);
-    } else {
-        flags.push("--no-subtitles".into());
-    }
-
-    if has_audio || has_subs {
-        cmd.extend(flags);
-        cmd.push(s(&a.input_file));
-    }
-    if opts.pl_eac3 && a.pol_audio.is_some() && p.temp_pol_audio.exists() {
-        cmd.extend(["--language".into(), "0:pol".into(), s(&p.temp_pol_audio)]);
-    }
-    if opts.extra && p.temp_eng_audio.exists() {
-        cmd.extend(["--language".into(), "0:eng".into(), s(&p.temp_eng_audio)]);
-    }
-
-    // mkvmerge zwraca 1 dla samych ostrzeżeń — to nadal sukces.
-    let ok = proc::run(Command::new("mkvmerge").args(&cmd).stdin(Stdio::null())).map_or(false, |c| c <= 1);
-    if !ok {
-        bail!("błąd mkvmerge — pliki tymczasowe pozostają, kolejne uruchomienie wznowi proces");
-    }
-
-    // Pliki tymczasowe usuwamy dopiero po udanym MKV.
+    // Pliki tymczasowe usuwamy dopiero po udanym złożeniu pliku.
     for f in [
         &p.temp_video, &p.step1, &p.step2, &p.temp_rpu, &p.temp_hdr10plus,
         &p.temp_eng_audio, &p.temp_pol_audio, &analysis_file.to_path_buf(),
@@ -220,6 +306,6 @@ pub fn run(opts: &Opts, a: &Analysis, analysis_file: &Path, panel: &mut Panel) -
         let _ = fs::remove_file(f);
     }
 
-    finish_copy(opts, a, &p.output_mkv, false, panel);
+    finish_copy(opts, a, &p.output, false, panel);
     Ok(())
 }

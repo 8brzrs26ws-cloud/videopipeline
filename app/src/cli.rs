@@ -55,7 +55,12 @@ pub fn run(opts: Opts, paths: Vec<PathBuf>) -> Result<i32> {
         println!("Brak plików wideo do przetworzenia. Zakończenie.");
         return Ok(0);
     }
-    println!("VideoPipeline v11 — tryb skryptowy: {} plik(ów) — {}", list.len(), summary(&opts));
+    println!(
+        "VideoPipeline {} — tryb skryptowy: {} plik(ów) — {}",
+        env!("CARGO_PKG_VERSION"),
+        list.len(),
+        summary(&opts)
+    );
 
     ctrlc::set_handler(|| {
         eprintln!("\nPrzerwanie — zatrzymuję aktywne procesy ffmpeg...");

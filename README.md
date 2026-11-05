@@ -1,9 +1,9 @@
-# VideoPipeline v11
+# VideoPipeline 0.11.1
 
 Port skryptu fish V9 na Rusta: biblioteka dynamiczna z całą logiką + binarka z interfejsem.
 
 ```
-videopipeline-v11/
+videopipeline/
 ├── core/   → libvideopipeline_core.so  (analiza, NVENC, mux, kopiowanie/SHA-512, monitoring)
 └── app/    → videopipeline             (TUI w stylu Midnight Commandera + tryb skryptowy)
 ```
@@ -36,6 +36,14 @@ Kod wyjścia trybu skryptowego: 0 = OK, 1 = błędy, 130 = przerwano (Ctrl+C).
 
 Zmiana tych opcji po wcześniejszej analizie powoduje ponowną analizę (o ile nie ma jeszcze zakodowanego wideo).
 Analiza ffprobe (ścieżki audio/napisy, profil koloru) jest zawsze wykonywana — jest szybka i potrzebna do muxu.
+
+## Kontener wyjściowy
+Plik wejściowy `.mp4`/`.MP4` daje wynik `.mp4`, każdy inny (mkv, mov, avi, m2ts) wynik `.mkv`.
+MKV składa mkvmerge, MP4 — ffmpeg (`-c copy`, `-tag:v hvc1`, `+faststart`; zapis do `*.mp4.part`, potem zmiana nazwy,
+żeby przerwany mux nie wyglądał na gotowy wynik). Audio i napisy źródła są kopiowane bez zmian (źródło MP4 ma je
+w formatach zgodnych z MP4), polskie/angielskie E-AC-3 z `-pleac3`/`-da` dostają jawnie ustawiony język.
+Ograniczenie MP4: RPU Dolby Vision i metadane HDR10+ zostają w strumieniu, ale ffmpeg nie zapisuje konfiguracji DV
+(dvcC), więc część odtwarzaczy pokaże zwykły HDR10. Gdy zależy Ci na pełnym DV, użyj źródła w MKV.
 
 ## Jakość (CQ)
 Domyślnie HEVC CQ 19, AV1 CQ 25 (mniej = lepsza jakość i większy plik). Zmiana w F7 (←/→ ±1, PgUp/PgDn ±5)

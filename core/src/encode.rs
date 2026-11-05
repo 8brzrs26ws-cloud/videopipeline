@@ -157,7 +157,7 @@ fn start(
     slot: usize,
     panel: &Panel,
 ) -> std::io::Result<Running> {
-    let p = opts.paths(&a.stem);
+    let p = opts.paths_for(&a.input_file);
     let key = sanitize(&a.filename);
     let pf = rt.progress_dir.join(format!("{key}.ffprogress"));
     let log = rt.progress_dir.join(format!("{key}.log"));
@@ -255,8 +255,8 @@ pub fn run_stage(opts: &Opts, rt: &Runtime, files: &[Analysis], panel: &Panel) {
             abort_all(&mut running, panel);
             return;
         }
-        let p = opts.paths(&a.stem);
-        if p.output_mkv.exists() {
+        let p = opts.paths_for(&a.input_file);
+        if p.output.exists() {
             panel.set(&a.filename, State::Done, "Plik wynikowy już istnieje");
             continue;
         }

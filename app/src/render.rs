@@ -210,7 +210,7 @@ fn summary(o: &Opts) -> String {
 fn render_topbar(f: &mut Frame, area: Rect, o: &Opts, queued: usize) {
     let mut spans = vec![
         Span::styled(
-            " VideoPipeline v11 ",
+            format!(" VideoPipeline {} ", env!("CARGO_PKG_VERSION")),
             Style::default().bg(col(BOX_ALL)).fg(col(TITLE)).add_modifier(Modifier::BOLD),
         ),
         Span::styled(format!("  {}", summary(o)), fg(DIM)),

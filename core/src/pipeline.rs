@@ -67,14 +67,13 @@ fn stages(opts: &Opts, rt: &Runtime, files: &[PathBuf], panel: &Panel) -> Result
             return Ok(());
         }
         let filename = input.file_name().unwrap().to_string_lossy().to_string();
-        let stem = input.file_stem().unwrap().to_string_lossy().to_string();
-        let p = opts.paths(&stem);
+        let p = opts.paths_for(input);
         panel.set(&filename, State::Analysis, "Analiza wejścia");
 
-        if p.output_mkv.exists() {
+        if p.output.exists() {
             // Gotowy wynik: ewentualnie tylko dokończ kopię (-c).
             if opts.copy {
-                match copy::copy_final_to_source_encoded(input, &p.output_mkv) {
+                match copy::copy_final_to_source_encoded(input, &p.output) {
                     Ok(()) => panel.set(&filename, State::Done, "Kopia w encoded zweryfikowana SHA-512"),
                     Err(e) => {
                         plog!("    BŁĄD kopiowania: {e:#}");

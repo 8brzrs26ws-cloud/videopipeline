@@ -15,7 +15,7 @@ use videopipeline_core::{config::*, files};
 #[command(
     name = "videopipeline",
     version,
-    about = "VideoPipeline v11 — TUI w stylu Midnight Commandera; z podanymi plikami/katalogami koduje od razu (tryb skryptowy)"
+    about = "VideoPipeline — TUI w stylu Midnight Commandera; z podanymi plikami/katalogami koduje od razu (tryb skryptowy)"
 )]
 struct Cli {
     /// Pliki lub katalogi do zakodowania. Gdy podane: tryb skryptowy (bez TUI), jak w V9
