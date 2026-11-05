@@ -1,0 +1,3 @@
+# std musi być linkowany dynamicznie, inaczej binarka + dylib dają błąd "std only shows up once".
+[build]
+rustflags = ["-C", "prefer-dynamic"]

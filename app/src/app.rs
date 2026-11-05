@@ -1,0 +1,492 @@
+//! Stan aplikacji TUI i obsługa klawiszy (styl Midnight Commandera).
+use crate::{
+    browser::{self, AddResult, Browser, Queue},
+    render,
+};
+use videopipeline_core::{
+    config::*,
+    log,
+    model::{Panel, Snapshot, State},
+    pipeline::{self, RunStatus, SharedStatus},
+    proc,
+    sysmon::{Monitor, SysStats},
+};
+use anyhow::Result;
+use ratatui::{
+    crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
+    DefaultTerminal,
+};
+use std::{
+    path::PathBuf,
+    sync::{Arc, Mutex},
+    thread::JoinHandle,
+    time::{Duration, Instant},
+};
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Focus {
+    Left,
+    Right,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    Normal,
+    Options,
+    Help,
+    Running,
+    Finished,
+    ConfirmAbort,
+    ConfirmQuit,
+}
+
+pub const OPTION_COUNT: usize = 12;
+/// Indeksy wierszy w oknie opcji (F7).
+pub const OPT_HEVC_CQ: usize = 1;
+pub const OPT_AV1_CQ: usize = 2;
+
+pub struct RunCtx {
+    pub status: SharedStatus,
+    pub panel: Panel,
+    pub handle: Option<JoinHandle<()>>,
+    pub opts: Opts,
+    pub last: RunStatus,
+}
+
+pub struct App {
+    pub opts: Opts,
+    pub browser: Browser,
+    pub queue: Queue,
+    pub focus: Focus,
+    pub mode: Mode,
+    pub opt_cursor: usize,
+    pub opt_edit: Option<String>,
+    pub status_msg: String,
+    pub run: Option<RunCtx>,
+    pub snapshot: Snapshot,
+    pub shutdown_at: Option<Instant>,
+    pub quit: bool,
+    pub do_shutdown: bool,
+    /// Obciążenie GPU/CPU/VRAM — monitor działa tylko podczas kodowania.
+    pub sys: SysStats,
+    pub monitor: Option<Monitor>,
+}
+
+impl App {
+    pub fn new(opts: Opts, start: PathBuf, initial: Vec<PathBuf>) -> Self {
+        let mut app = App {
+            opts,
+            browser: Browser::new(start),
+            queue: Queue::new(),
+            focus: Focus::Left,
+            mode: Mode::Normal,
+            opt_cursor: 0,
+            opt_edit: None,
+            status_msg: String::new(),
+            run: None,
+            snapshot: Snapshot::default(),
+            shutdown_at: None,
+            quit: false,
+            do_shutdown: false,
+            sys: SysStats::default(),
+            monitor: None,
+        };
+        if !initial.is_empty() {
+            app.add_paths(initial);
+        }
+        app
+    }
+
+    // ------------------------------------------------------------------ run ---
+
+    /// Odświeża migawkę stanu pipeline'u i wykrywa zakończenie pracy.
+    pub fn poll_run(&mut self) {
+        let Some(run) = self.run.as_mut() else { return };
+        self.snapshot = run.panel.snapshot();
+        let st = run.status.lock().map(|g| g.clone()).unwrap_or(RunStatus::Running);
+        if st != RunStatus::Running && run.last == RunStatus::Running {
+            run.last = st.clone();
+            if let Some(h) = run.handle.take() {
+                let _ = h.join();
+            }
+            if st == RunStatus::Done && run.opts.shutdown {
+                self.shutdown_at = Some(Instant::now() + Duration::from_secs(10));
+            }
+            self.monitor = None; // koniec pracy — zatrzymaj nvidia-smi
+            self.mode = Mode::Finished;
+        }
+    }
+
+    pub fn check_shutdown(&mut self) {
+        if let Some(t) = self.shutdown_at {
+            if Instant::now() >= t {
+                self.do_shutdown = true;
+                self.quit = true;
+            }
+        }
+    }
+
+    fn start_run(&mut self) {
+        if self.queue.items.is_empty() {
+            self.status_msg = "Kolejka jest pusta — zaznacz pliki w lewym panelu i naciśnij F5".into();
+            return;
+        }
+        proc::set_cancel(false);
+        log::clear();
+        let files: Vec<PathBuf> = self.queue.items.iter().map(|q| q.path.clone()).collect();
+        let panel = Panel::default();
+        let status: SharedStatus = Arc::new(Mutex::new(RunStatus::Running));
+        let handle = pipeline::spawn(self.opts.clone(), files, panel.clone(), status.clone());
+        self.run = Some(RunCtx {
+            status,
+            panel,
+            handle: Some(handle),
+            opts: self.opts.clone(),
+            last: RunStatus::Running,
+        });
+        self.snapshot = Snapshot::default();
+        self.shutdown_at = None;
+        self.sys = SysStats::default();
+        self.monitor = Some(Monitor::start());
+        self.mode = Mode::Running;
+    }
+
+    fn abort(&mut self) {
+        proc::set_cancel(true);
+        proc::kill_all();
+    }
+
+    fn close_run(&mut self) {
+        // Z kolejki znikają pliki, które zostały w pełni przetworzone.
+        let done: Vec<String> = self
+            .snapshot
+            .items
+            .iter()
+            .filter(|(_, it)| it.state == State::Done)
+            .map(|(n, _)| n.clone())
+            .collect();
+        self.queue.retain_by_name(|n| !done.iter().any(|d| d == n));
+        self.run = None;
+        self.snapshot = Snapshot::default();
+        self.shutdown_at = None;
+        self.monitor = None;
+        self.mode = Mode::Normal;
+        proc::set_cancel(false);
+    }
+
+    fn request_quit(&mut self) {
+        if matches!(self.mode, Mode::Running | Mode::ConfirmAbort | Mode::ConfirmQuit) {
+            self.mode = Mode::ConfirmQuit;
+        } else {
+            self.quit = true;
+        }
+    }
+
+    // ----------------------------------------------------------------- queue ---
+
+    fn add_paths(&mut self, paths: Vec<PathBuf>) {
+        let (mut added, mut dup, mut clash) = (0, 0, 0);
+        for p in paths {
+            let list = if p.is_dir() {
+                browser::videos_in(&p)
+            } else if browser::is_video(&p) {
+                vec![p]
+            } else {
+                vec![]
+            };
+            for v in list {
+                match self.queue.add(v) {
+                    AddResult::Added => added += 1,
+                    AddResult::Duplicate => dup += 1,
+                    AddResult::NameClash => clash += 1,
+                }
+            }
+        }
+        self.status_msg = format!("Dodano do kolejki: {added}");
+        if dup > 0 {
+            self.status_msg.push_str(&format!(", już były: {dup}"));
+        }
+        if clash > 0 {
+            self.status_msg.push_str(&format!(", pominięto (ta sama nazwa pliku): {clash}"));
+        }
+    }
+
+    fn add_from_left(&mut self) {
+        let mut paths: Vec<PathBuf> = vec![];
+        if !self.browser.marked.is_empty() {
+            paths.extend(self.browser.marked.iter().cloned());
+            self.browser.marked.clear();
+        } else if let Some(e) = self.browser.selected() {
+            if !e.is_up {
+                paths.push(e.path.clone());
+            }
+        }
+        self.add_paths(paths);
+    }
+
+    fn move_cursor(&mut self, d: isize) {
+        match self.focus {
+            Focus::Left => self.browser.move_by(d),
+            Focus::Right => self.queue.move_by(d),
+        }
+    }
+
+    /// Shift+ruch — zaznaczanie zakresu jak w Midnight Commanderze.
+    fn select_move(&mut self, d: isize) {
+        match self.focus {
+            Focus::Left => self.browser.select_move(d),
+            Focus::Right => self.queue.select_move(d),
+        }
+    }
+
+    /// '+' wszystko, '-' wyczyść, '*' odwróć.
+    fn marks(&mut self, op: char) {
+        match (self.focus, op) {
+            (Focus::Left, '+') => self.browser.mark_all(),
+            (Focus::Left, '-') => self.browser.clear_marks(),
+            (Focus::Left, _) => self.browser.invert_marks(),
+            (Focus::Right, '+') => self.queue.mark_all(),
+            (Focus::Right, '-') => self.queue.clear_marks(),
+            (Focus::Right, _) => self.queue.invert_marks(),
+        }
+    }
+
+    fn page(&self) -> isize {
+        match self.focus {
+            Focus::Left => self.browser.page.max(1) as isize,
+            Focus::Right => self.queue.page.max(1) as isize,
+        }
+    }
+
+    // ------------------------------------------------------------------ keys ---
+
+    pub fn on_key(&mut self, k: KeyEvent) {
+        self.status_msg.clear();
+        if k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('c') {
+            self.request_quit();
+            return;
+        }
+        match self.mode {
+            Mode::Normal => self.key_normal(k),
+            Mode::Options => self.key_options(k),
+            Mode::Help => self.mode = Mode::Normal,
+            Mode::Running => {
+                if matches!(k.code, KeyCode::Esc | KeyCode::F(10)) {
+                    self.mode = Mode::ConfirmAbort;
+                }
+            }
+            Mode::ConfirmAbort => self.key_confirm(k, false),
+            Mode::ConfirmQuit => self.key_confirm(k, true),
+            Mode::Finished => {
+                if self.shutdown_at.is_some() {
+                    self.shutdown_at = None;
+                    self.status_msg = "Wyłączenie komputera anulowane".into();
+                } else {
+                    self.close_run();
+                }
+            }
+        }
+    }
+
+    fn key_normal(&mut self, k: KeyEvent) {
+        // Shift + strzałki/PgUp/PgDn/Home/End: zaznaczanie wielu plików (jak w MC).
+        if k.modifiers.contains(KeyModifiers::SHIFT) {
+            let page = self.page();
+            let d = match k.code {
+                KeyCode::Up => Some(-1),
+                KeyCode::Down => Some(1),
+                KeyCode::PageUp => Some(-page),
+                KeyCode::PageDown => Some(page),
+                KeyCode::Home => Some(-1_000_000),
+                KeyCode::End => Some(1_000_000),
+                _ => None,
+            };
+            if let Some(d) = d {
+                self.select_move(d);
+                return;
+            }
+        }
+        match k.code {
+            KeyCode::Tab | KeyCode::BackTab => {
+                self.focus = match self.focus {
+                    Focus::Left => Focus::Right,
+                    Focus::Right => Focus::Left,
+                }
+            }
+            KeyCode::Up => self.move_cursor(-1),
+            KeyCode::Down => self.move_cursor(1),
+            KeyCode::PageUp => {
+                let p = self.page();
+                self.move_cursor(-p);
+            }
+            KeyCode::PageDown => {
+                let p = self.page();
+                self.move_cursor(p);
+            }
+            KeyCode::Home => self.move_cursor(-1_000_000),
+            KeyCode::End => self.move_cursor(1_000_000),
+            KeyCode::Enter => {
+                if self.focus == Focus::Left {
+                    if let Some(p) = self.browser.activate() {
+                        self.add_paths(vec![p]);
+                    }
+                }
+            }
+            KeyCode::Backspace => {
+                if self.focus == Focus::Left {
+                    self.browser.go_up();
+                }
+            }
+            KeyCode::Insert | KeyCode::Char(' ') => match self.focus {
+                Focus::Left => self.browser.toggle_mark(),
+                Focus::Right => self.queue.toggle_mark(),
+            },
+            KeyCode::Char(c @ ('+' | '-' | '*')) => self.marks(c),
+            KeyCode::F(1) => self.mode = Mode::Help,
+            KeyCode::F(5) => self.add_from_left(),
+            KeyCode::F(7) => self.mode = Mode::Options,
+            KeyCode::F(8) | KeyCode::Delete => {
+                let n = self.queue.remove_marked_or_current();
+                self.status_msg = format!("Usunięto z kolejki: {n}");
+            }
+            KeyCode::F(9) => self.start_run(),
+            KeyCode::F(10) => self.request_quit(),
+            _ => {}
+        }
+    }
+
+    fn key_confirm(&mut self, k: KeyEvent, quit_after: bool) {
+        match k.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Char('t') | KeyCode::Char('T') | KeyCode::Enter => {
+                self.abort();
+                if quit_after {
+                    if let Some(run) = self.run.as_mut() {
+                        if let Some(h) = run.handle.take() {
+                            let _ = h.join();
+                        }
+                    }
+                    self.quit = true;
+                } else {
+                    self.mode = Mode::Running;
+                }
+            }
+            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => self.mode = Mode::Running,
+            _ => {}
+        }
+    }
+
+    fn key_options(&mut self, k: KeyEvent) {
+        // Tryb edycji katalogu wyjściowego.
+        if let Some(mut buf) = self.opt_edit.take() {
+            match k.code {
+                KeyCode::Enter => {
+                    let v = buf.trim().to_string();
+                    if !v.is_empty() {
+                        self.opts.output_dir = expand_home(&v);
+                    }
+                }
+                KeyCode::Esc => {}
+                KeyCode::Backspace => {
+                    buf.pop();
+                    self.opt_edit = Some(buf);
+                }
+                KeyCode::Char(c) => {
+                    buf.push(c);
+                    self.opt_edit = Some(buf);
+                }
+                _ => self.opt_edit = Some(buf),
+            }
+            return;
+        }
+
+        match k.code {
+            KeyCode::Esc | KeyCode::F(7) | KeyCode::F(10) => self.mode = Mode::Normal,
+            KeyCode::Up => self.opt_cursor = self.opt_cursor.saturating_sub(1),
+            KeyCode::Down => self.opt_cursor = (self.opt_cursor + 1).min(OPTION_COUNT - 1),
+            KeyCode::Left | KeyCode::Char('-') => self.adjust_option(-1),
+            KeyCode::Right | KeyCode::Char('+') | KeyCode::Char('=') => self.adjust_option(1),
+            KeyCode::PageDown => self.adjust_option(-5),
+            KeyCode::PageUp => self.adjust_option(5),
+            KeyCode::Enter | KeyCode::Char(' ') => self.toggle_option(),
+            _ => {}
+        }
+    }
+
+    /// Strzałki: na wierszach CQ zmieniają wartość o `d`, na pozostałych przełączają opcję.
+    fn adjust_option(&mut self, d: i32) {
+        let bump = |v: u8| (v as i32 + d).clamp(CQ_MIN as i32, CQ_MAX as i32) as u8;
+        match self.opt_cursor {
+            OPT_HEVC_CQ => self.opts.hevc_cq = bump(self.opts.hevc_cq),
+            OPT_AV1_CQ => self.opts.av1_cq = bump(self.opts.av1_cq),
+            _ => self.toggle_option(),
+        }
+    }
+
+    fn toggle_option(&mut self) {
+        match self.opt_cursor {
+            0 => {
+                self.opts.codec = match self.opts.codec {
+                    Codec::Hevc => Codec::Av1,
+                    Codec::Av1 => Codec::Hevc,
+                }
+            }
+            // 1, 2: wiersze CQ — zmieniane strzałkami (Enter/Spacja nic nie robią)
+            3 => self.opts.pl_eac3 = !self.opts.pl_eac3,
+            4 => self.opts.extra = !self.opts.extra,
+            5 => self.opts.denoise = !self.opts.denoise,
+            6 => self.opts.no_crop = !self.opts.no_crop,
+            7 => self.opts.no_dv = !self.opts.no_dv,
+            8 => self.opts.no_hdr10plus = !self.opts.no_hdr10plus,
+            9 => self.opts.copy = !self.opts.copy,
+            10 => self.opts.shutdown = !self.opts.shutdown,
+            11 => self.opt_edit = Some(self.opts.output_dir.to_string_lossy().to_string()),
+            _ => {}
+        }
+    }
+}
+
+fn expand_home(s: &str) -> PathBuf {
+    if let Some(rest) = s.strip_prefix("~/") {
+        if let Ok(home) = std::env::var("HOME") {
+            return PathBuf::from(home).join(rest);
+        }
+    }
+    PathBuf::from(s)
+}
+
+// -------------------------------------------------------------------------
+
+pub fn run(app: &mut App) -> Result<()> {
+    let mut terminal = ratatui::init();
+    let res = event_loop(&mut terminal, app);
+    ratatui::restore();
+    proc::kill_all();
+    res
+}
+
+fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
+    let mut last_tick = Instant::now();
+    while !app.quit {
+        app.poll_run();
+        terminal.draw(|f| render::draw(f, app))?;
+
+        if event::poll(Duration::from_millis(200))? {
+            if let Event::Key(k) = event::read()? {
+                if k.kind == KeyEventKind::Press {
+                    app.on_key(k);
+                }
+            }
+        }
+        if last_tick.elapsed() >= Duration::from_secs(1) {
+            if let Some(r) = &app.run {
+                r.panel.tick();
+            }
+            if let Some(m) = app.monitor.as_mut() {
+                app.sys = m.sample();
+            }
+            last_tick = Instant::now();
+        }
+        app.check_shutdown();
+    }
+    Ok(())
+}
