@@ -65,7 +65,8 @@ fi
 
 # --------------------------------------------------------------------------- 3. ffmpeg
 log "3/5 ffmpeg $FFMPEG_VERSION (statyczny, NVENC/NVDEC/CUDA-LLVM, $TARGET_CPU)"
-FFPREFIX="$CACHE/ffmpeg-$FFMPEG_VERSION"
+# Katalog z sufiksem -gpl: stary cache bez --enable-gpl (bez hqdn3d) nie zostanie użyty ponownie.
+FFPREFIX="$CACHE/ffmpeg-$FFMPEG_VERSION-gpl"
 NVH="$CACHE/nv-codec-headers"
 if [[ "$FORCE" = 1 || ! -x "$FFPREFIX/bin/ffmpeg" ]]; then
     rm -rf "$NVH" "$WORK/nv-codec-headers"
@@ -85,6 +86,7 @@ if [[ "$FORCE" = 1 || ! -x "$FFPREFIX/bin/ffmpeg" ]]; then
             --prefix="$FFPREFIX" \
             --pkg-config-flags=--static \
             --extra-cflags="-march=$TARGET_CPU -O2" \
+            --enable-gpl \
             --disable-autodetect --disable-doc --disable-ffplay --disable-debug \
             --disable-shared --enable-static \
             --enable-ffnvcodec --enable-nvenc --enable-nvdec --enable-cuda --enable-cuda-llvm \
