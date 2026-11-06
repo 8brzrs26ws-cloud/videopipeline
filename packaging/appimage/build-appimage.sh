@@ -37,7 +37,7 @@ pkg-config --exists dav1d || fail "brak libdav1d-dev (pkg-config dav1d)"
 
 # --------------------------------------------------------------------------- 1. aplikacja
 log "1/5 videopipeline + biblioteka core ($TARGET_CPU)"
-VP_RUSTFLAGS_EXTRA="-C target-cpu=$TARGET_CPU" ./build.sh
+VP_RUSTFLAGS_EXTRA="-C target-cpu=$TARGET_CPU" bash ./build.sh
 [[ -x target/release/videopipeline && -f target/release/libvideopipeline_core.so ]] \
     || fail "build.sh nie wytworzył binarki/biblioteki"
 
