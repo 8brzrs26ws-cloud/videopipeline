@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=VideoPipeline
+GenericName=Kodowanie wideo
+Comment=HEVC/AV1 NVENC, Dolby Vision, HDR10+ — interfejs w stylu Midnight Commandera
+Exec=videopipeline
+Icon=videopipeline
+Terminal=true
+Categories=AudioVideo;Video;
+StartupNotify=false

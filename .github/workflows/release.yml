@@ -1,0 +1,57 @@
+name: Release (AppImage x86-64-v3)
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag wydania do utworzenia (np. v0.11.1). Puste = tylko artefakt do pobrania, bez wydania.'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  appimage:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Zależności systemowe
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential nasm pkg-config clang patchelf file wget git ca-certificates xz-utils \
+            mkvtoolnix libdav1d-dev zlib1g-dev desktop-file-utils libfuse2
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache (ffmpeg, dovi_tool, hdr10plus_tool, linuxdeploy, cargo)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            build/cache
+          key: appimage-${{ runner.os }}-${{ hashFiles('packaging/appimage/build-appimage.sh') }}
+          restore-keys: appimage-${{ runner.os }}-
+
+      - name: Budowanie AppImage
+        run: packaging/appimage/build-appimage.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VideoPipeline-AppImage
+          path: dist/*
+          if-no-files-found: error
+
+      - name: Wydanie na GitHubie
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          files: dist/*
+          generate_release_notes: true

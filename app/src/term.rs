@@ -37,7 +37,12 @@ pub fn relaunch_in_terminal() -> Option<i32> {
     if has_tty() || env::var_os(MARK).is_some() {
         return None;
     }
-    let exe = env::current_exe().ok()?;
+    // W AppImage current_exe() to ścieżka w tymczasowym montowaniu; ponowne uruchomienie
+    // w terminalu ma użyć samego pliku AppImage ($APPIMAGE).
+    let exe = match env::var_os("APPIMAGE") {
+        Some(p) if !p.is_empty() => std::path::PathBuf::from(p),
+        _ => env::current_exe().ok()?,
+    };
     let args: Vec<String> = env::args().skip(1).collect();
 
     // Własne wskazanie terminala ma pierwszeństwo: VIDEOPIPELINE_TERMINAL="foot" itp.

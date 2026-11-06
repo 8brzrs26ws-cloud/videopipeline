@@ -1,0 +1,27 @@
+#!/bin/sh
+# Punkt wejścia AppImage: sprawdza CPU (x86-64-v3), ustawia PATH na dołączone narzędzia
+# (ffmpeg, ffprobe, mkvmerge, dovi_tool, hdr10plus_tool) i uruchamia videopipeline.
+HERE="$(dirname "$(readlink -f "$0")")"
+export APPDIR="${APPDIR:-$HERE}"
+
+# Budowane pod x86-64-v3 (Haswell/Zen 1 i nowsze): AVX, AVX2, BMI1/2, F16C, FMA, LZCNT, MOVBE, XSAVE.
+flags="$(grep -m1 '^flags' /proc/cpuinfo 2>/dev/null)"
+missing=""
+for f in avx avx2 bmi1 bmi2 f16c fma abm movbe xsave; do
+    case " $flags " in
+        *" $f "*) ;;
+        *) missing="$missing $f" ;;
+    esac
+done
+if [ -n "$flags" ] && [ -n "$missing" ]; then
+    echo "VideoPipeline: ten AppImage wymaga procesora x86-64-v3 (brak:$missing)." >&2
+    exit 1
+fi
+
+export PATH="$APPDIR/usr/bin:$PATH"
+# libmagic (mkvmerge) bez systemowej bazy typów plików na hoście.
+if [ -f "$APPDIR/usr/share/misc/magic.mgc" ]; then
+    export MAGIC="$APPDIR/usr/share/misc/magic.mgc"
+fi
+
+exec "$APPDIR/usr/bin/videopipeline" "$@"

@@ -51,6 +51,24 @@ albo flagami `--hevc-cq N`, `--av1-cq N`, `-q N` (dla wybranego kodeka). Zakres 
 Przy wartości innej niż domyślna nazwy plików dostają `_cqN` (np. `film_hevc_cq16.mkv`), więc wyniki o różnej
 jakości nie nadpisują się, a wznowienie nie użyje tymczasowego pliku z innym CQ.
 
+## Wydania: AppImage (x86-64-v3)
+Na stronie *Releases* na GitHubie jest gotowy plik `VideoPipeline-<wersja>-x86_64_v3.AppImage` z dołączonymi:
+ffmpeg i ffprobe (NVENC/NVDEC/CUDA, statycznie), mkvmerge, dovi_tool, hdr10plus_tool oraz bibliotekami programu.
+Kod własny i narzędzia z Rusta/ffmpeg są kompilowane pod **x86-64-v3** (AVX2, BMI2, FMA — Haswell/Zen 1 i nowsze);
+na starszym procesorze AppImage wypisze komunikat i nie ruszy. Sterowniki NVIDIA i `nvidia-smi` pochodzą z systemu.
+
+    chmod +x VideoPipeline-*-x86_64_v3.AppImage
+    ./VideoPipeline-*-x86_64_v3.AppImage            # TUI; z plikami/katalogami: tryb skryptowy
+    ./VideoPipeline-*.AppImage --appimage-extract-and-run   # gdy brakuje FUSE (libfuse2)
+
+Dwuklik na pliku AppImage w KDE otwiera okno terminala (patrz niżej). Sumy kontrolne: plik `.sha256` obok obrazu.
+
+Budowanie: `packaging/appimage/build-appimage.sh` (lokalnie na Ubuntu/Debian, zależności w nagłówku skryptu) albo
+workflow `.github/workflows/release.yml` — uruchamia się po wypchnięciu tagu `v*` (np. `git tag v0.11.1 && git push origin v0.11.1`)
+albo ręcznie z zakładki *Actions → Release → Run workflow* (z polem `tag` powstaje wydanie, bez niego sam artefakt).
+Wersje składników: ffmpeg `FFMPEG_VERSION` (domyślnie 7.1.1), nv-codec-headers `NVCODEC_HEADERS_REF` (domyślnie master),
+dovi_tool i hdr10plus_tool — najnowsze z crates.io. Licencje dołączonych składników: `packaging/appimage/THIRD-PARTY-NOTICES.md`.
+
 ## Uruchamianie z menu / dwuklikiem (KDE)
 `./install.sh` (po `./build.sh`) kopiuje program do `~/.local/bin`, instaluje ikonę (`icons/`, klatka filmu w imadle)
 i dodaje wpis „VideoPipeline” do menu aplikacji (`Terminal=true`). Dwuklik bezpośrednio na pliku binarnym też działa:
