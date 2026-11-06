@@ -67,7 +67,7 @@ Budowanie: `packaging/appimage/build-appimage.sh` (lokalnie na Ubuntu/Debian, za
 workflow `.github/workflows/release.yml` — uruchamia się po wypchnięciu tagu `v*` (np. `git tag v0.11.1 && git push origin v0.11.1`)
 albo ręcznie z zakładki *Actions → Release → Run workflow* (z polem `tag` powstaje wydanie, bez niego sam artefakt).
 Wersje składników: ffmpeg `FFMPEG_VERSION` (domyślnie 7.1.1), nv-codec-headers `NVCODEC_HEADERS_REF` (domyślnie master),
-dovi_tool i hdr10plus_tool — najnowsze z crates.io. Licencje dołączonych składników: `packaging/appimage/THIRD-PARTY-NOTICES.md`.
+dovi_tool (`DOVI_TOOL_REF`, domyślnie 2.3.4) i hdr10plus_tool (`HDR10PLUS_TOOL_REF`, domyślnie 1.7.2) — z tagów na GitHubie (nie ma ich na crates.io). Licencje dołączonych składników: `packaging/appimage/THIRD-PARTY-NOTICES.md`.
 
 ## Uruchamianie z menu / dwuklikiem (KDE)
 `./install.sh` (po `./build.sh`) kopiuje program do `~/.local/bin`, instaluje ikonę (`icons/`, klatka filmu w imadle)

@@ -8,7 +8,8 @@
 #   build-essential nasm pkg-config clang patchelf file wget git mkvtoolnix libdav1d-dev zlib1g-dev
 #   + rustup/cargo. Uruchamiane w CI przez .github/workflows/release.yml, ale działa też lokalnie.
 #
-# Zmienne: VERSION, FFMPEG_VERSION, NVCODEC_HEADERS_REF (domyślnie master), TARGET_CPU, JOBS, FORCE=1.
+# Zmienne: VERSION, FFMPEG_VERSION, NVCODEC_HEADERS_REF (domyślnie master), DOVI_TOOL_REF, HDR10PLUS_TOOL_REF,
+# TARGET_CPU, JOBS, FORCE=1.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -17,6 +18,9 @@ cd "$ROOT"
 VERSION="${VERSION:-$(grep -m1 '^version' app/Cargo.toml | cut -d'"' -f2)}"
 FFMPEG_VERSION="${FFMPEG_VERSION:-7.1.1}"
 NVCODEC_HEADERS_REF="${NVCODEC_HEADERS_REF:-}"
+# dovi_tool i hdr10plus_tool nie są na crates.io (tylko biblioteki dolby_vision/hdr10plus) — budujemy z GitHuba, z tagów.
+DOVI_TOOL_REF="${DOVI_TOOL_REF:-2.3.4}"
+HDR10PLUS_TOOL_REF="${HDR10PLUS_TOOL_REF:-1.7.2}"
 TARGET_CPU="${TARGET_CPU:-x86-64-v3}"
 JOBS="${JOBS:-$(nproc)}"
 FORCE="${FORCE:-0}"
@@ -42,11 +46,19 @@ VP_RUSTFLAGS_EXTRA="-C target-cpu=$TARGET_CPU" bash ./build.sh
     || fail "build.sh nie wytworzył binarki/biblioteki"
 
 # --------------------------------------------------------------------------- 2. dovi_tool, hdr10plus_tool
-log "2/5 dovi_tool + hdr10plus_tool (cargo install, $TARGET_CPU)"
+log "2/5 dovi_tool $DOVI_TOOL_REF + hdr10plus_tool $HDR10PLUS_TOOL_REF (cargo install --git, $TARGET_CPU)"
 TOOLS="$CACHE/tools"
-if [[ "$FORCE" = 1 || ! -x "$TOOLS/bin/dovi_tool" || ! -x "$TOOLS/bin/hdr10plus_tool" ]]; then
-    RUSTFLAGS="-C target-cpu=$TARGET_CPU" CARGO_TARGET_DIR="$WORK/tools-target" \
-        cargo install --locked --force --root "$TOOLS" dovi_tool hdr10plus_tool
+STAMP="dovi_tool=$DOVI_TOOL_REF hdr10plus_tool=$HDR10PLUS_TOOL_REF cpu=$TARGET_CPU"
+if [[ "$FORCE" = 1 || ! -x "$TOOLS/bin/dovi_tool" || ! -x "$TOOLS/bin/hdr10plus_tool" \
+      || "$(cat "$TOOLS/.stamp" 2>/dev/null)" != "$STAMP" ]]; then
+    export RUSTFLAGS="-C target-cpu=$TARGET_CPU"
+    export CARGO_TARGET_DIR="$WORK/tools-target"
+    cargo install --locked --force --root "$TOOLS" \
+        --git https://github.com/quietvoid/dovi_tool --tag "$DOVI_TOOL_REF" dovi_tool
+    cargo install --locked --force --root "$TOOLS" \
+        --git https://github.com/quietvoid/hdr10plus_tool --tag "$HDR10PLUS_TOOL_REF" hdr10plus_tool
+    unset RUSTFLAGS CARGO_TARGET_DIR
+    echo "$STAMP" > "$TOOLS/.stamp"
 fi
 "$TOOLS/bin/dovi_tool" --version
 "$TOOLS/bin/hdr10plus_tool" --version
