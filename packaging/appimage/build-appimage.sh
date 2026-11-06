@@ -119,7 +119,10 @@ install -m755 target/release/videopipeline "$APPDIR/usr/bin/"
 install -m755 target/release/libvideopipeline_core.so "$APPDIR/usr/lib/"
 # Rust dylib: binarka i biblioteka core potrzebują libstd z sysroot rustc.
 SYSROOT="$(rustc --print sysroot)"
-cp "$SYSROOT"/lib/libstd-*.so "$APPDIR/usr/lib/"
+STD_SO="$(find "$SYSROOT/lib" -name 'libstd-*.so' | head -n1)"
+[ -n "$STD_SO" ] || { echo "BŁĄD: brak libstd-*.so w $SYSROOT/lib"; exit 1; }
+echo "libstd: $STD_SO"
+cp "$STD_SO" "$APPDIR/usr/lib/"
 
 install -m755 "$FFPREFIX/bin/ffmpeg" "$FFPREFIX/bin/ffprobe" "$APPDIR/usr/bin/"
 install -m755 "$TOOLS/bin/dovi_tool" "$TOOLS/bin/hdr10plus_tool" "$APPDIR/usr/bin/"
