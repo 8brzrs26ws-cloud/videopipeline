@@ -200,10 +200,16 @@ fi
 log "5/5 linuxdeploy → AppImage"
 BIN="$CACHE/bin"
 mkdir -p "$BIN"
-LD_URL="https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous"
-for t in linuxdeploy-x86_64.AppImage linuxdeploy-plugin-appimage-x86_64.AppImage; do
-    [[ -x "$BIN/$t" ]] || { wget -q -O "$BIN/$t" "$LD_URL/$t"; chmod +x "$BIN/$t"; }
-done
+dl() {   # $1 = repo linuxdeploy/<repo>, $2 = nazwa pliku w wydaniu "continuous"
+    local f="$BIN/$2"
+    if [[ ! -x "$f" ]]; then
+        wget -nv -O "$f.part" "https://github.com/linuxdeploy/$1/releases/download/continuous/$2" \
+            || fail "nie udało się pobrać $2 z github.com/linuxdeploy/$1"
+        mv "$f.part" "$f"; chmod +x "$f"
+    fi
+}
+dl linuxdeploy linuxdeploy-x86_64.AppImage
+dl linuxdeploy-plugin-appimage linuxdeploy-plugin-appimage-x86_64.AppImage
 # linuxdeploy szuka wtyczki "linuxdeploy-plugin-appimage" w PATH.
 ln -sf "$BIN/linuxdeploy-plugin-appimage-x86_64.AppImage" "$BIN/linuxdeploy-plugin-appimage"
 
