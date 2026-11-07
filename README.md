@@ -92,9 +92,14 @@ np. `HEVC NVENC → AV1 NVENC → HEVC QSV`; pod listą widać, co wykryto. Pozo
 
 ![Okno kodowania — NVIDIA NVENC](docs/screenshots/kodowanie.png)
 
-Kodowanie na karcie Intel (HEVC QSV, Iris Xe w Core i5-1235U, dekodowanie `h264_qsv`):
+Linux, kodowanie na karcie Intel (HEVC QSV, Iris Xe w Core i5-1235U, dekodowanie `h264_qsv`):
 
 ![Okno kodowania — Intel QSV](docs/screenshots/kodowanie-intel.png)
+
+Windows 11, Core Ultra 5 225H (Intel Arc): HEVC QSV z dekodowaniem `h264_qsv`, ok. 90 fps, monitor z liczników
+„GPU Engine”:
+
+![Okno kodowania — Windows, Intel QSV](docs/screenshots/kodowanie-windows-intel.jpg)
 
 ### Tryb skryptowy
 
