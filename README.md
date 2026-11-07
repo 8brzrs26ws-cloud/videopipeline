@@ -77,7 +77,11 @@ np. `HEVC NVENC → AV1 NVENC → HEVC QSV`; pod listą widać, co wykryto. Pozo
   odszumianie, konwersja), RENDER, taktowanie i pamięć karty — z `/proc/<pid>/fdinfo` procesów ffmpeg, bez uprawnień roota;
 - zawsze CPU i RAM.
 
-![Okno kodowania](docs/screenshots/kodowanie.png)
+![Okno kodowania — NVIDIA NVENC](docs/screenshots/kodowanie.png)
+
+Kodowanie na karcie Intel (HEVC QSV, Iris Xe w Core i5-1235U, dekodowanie `h264_qsv`):
+
+![Okno kodowania — Intel QSV](docs/screenshots/kodowanie-intel.png)
 
 ### Tryb skryptowy
 
