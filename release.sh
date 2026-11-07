@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Wysyła pliki BIEŻĄCEJ wersji z dist/ jako wydanie na GitHubie:  ./release.sh v0.12.2
+# Wysyła pliki BIEŻĄCEJ wersji z dist/ jako wydanie na GitHubie:  ./release.sh v0.13.0
 # Bierze tylko pliki z numerem wersji z tagu (starsze buildy leżące w dist/ są pomijane),
 # a tag musi zgadzać się z wersją w app/Cargo.toml.
 # Wymaga zalogowanego `gh` (gh auth login). Istniejące wydanie dostaje pliki podmienione (--clobber).
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
-TAG="${1:?podaj tag, np. ./release.sh v0.12.2}"
+TAG="${1:?podaj tag, np. ./release.sh v0.13.0}"
 VER="${TAG#v}"
 CARGO_VER="$(grep -m1 '^version' app/Cargo.toml | cut -d'"' -f2)"
 [[ "$VER" = "$CARGO_VER" ]] || { echo "BŁĄD: tag $TAG nie zgadza się z wersją w app/Cargo.toml ($CARGO_VER)" >&2; exit 1; }
