@@ -38,6 +38,7 @@ mkdir -p "$CACHE" "$WORK" "$DIST"
 log()  { printf '\n\033[1;32m==> %s\033[0m\n' "$*"; }
 fail() { printf '\n\033[1;31mBŁĄD: %s\033[0m\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || fail "brak polecenia: $1"; }
+trap 'fail "przerwano w linii $LINENO: $BASH_COMMAND"' ERR
 
 # "latest" → najnowsze stabilne wydanie.
 latest_git_tag() {   # $1 = repo URL; zwraca najwyższy tag semver (bez prefiksu v)

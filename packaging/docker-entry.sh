@@ -2,6 +2,7 @@
 # Uruchamiane WEWNĄTRZ kontenera (docker/Dockerfile).
 # TARGETS: "linux" (AppImage + deb z tego samego drzewa plików), "windows" (.zip), domyślnie oba.
 set -euo pipefail
+trap 'echo "BŁĄD: budowanie przerwane (linia $LINENO: $BASH_COMMAND)" >&2' ERR
 mkdir -p "$HOME"
 cd /src
 git config --global --add safe.directory /src 2>/dev/null || true
@@ -13,3 +14,4 @@ fi
 if [[ " $TARGETS " == *" windows "* ]]; then
     bash packaging/windows/build-windows.sh
 fi
+echo "Zbudowane cele: $TARGETS"

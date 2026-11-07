@@ -44,6 +44,8 @@ mkdir -p "$CACHE" "$WORK" "$DIST" "$DEPS"
 log()  { printf '\n\033[1;36m==> [Windows] %s\033[0m\n' "$*"; }
 fail() { printf '\n\033[1;31mBŁĄD [Windows]: %s\033[0m\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || fail "brak polecenia: $1"; }
+# Każdy nieobsłużony błąd (set -e) pokazuje, gdzie i na czym skrypt się zatrzymał.
+trap 'fail "przerwano w linii $LINENO: $BASH_COMMAND"' ERR
 
 for c in cargo rustc "$CC_W" "$CXX_W" "$TRIPLE-objdump" "$TRIPLE-strip" meson ninja cmake nasm clang \
          pkg-config git wget zip; do need "$c"; done
@@ -53,25 +55,41 @@ rustup target list --installed 2>/dev/null | grep -qx "$RTARGET" \
     || fail "brak celu Rust $RTARGET (rustup target add $RTARGET — robi to docker/Dockerfile)"
 
 # ------------------------------------------------------------------ wersje "latest"
-latest_git_tag() {   # $1 = repo; najwyższy tag semver (bez "v")
-    git ls-remote --tags --refs "$1" | sed 's|.*refs/tags/||' | grep -E '^v?[0-9]+(\.[0-9]+)+$' \
-        | sed 's/^v//' | sort -V | tail -n1
+# Każde ustalenie wersji jest odporne na pipefail i kończy się czytelnym błędem (wcześniej skrypt
+# potrafił zakończyć się bez komunikatu, gdy np. strona z listą wersji nie odpowiedziała).
+latest_git_tag() {   # $1 = repo, $2 = opcjonalny prefiks tagu (np. "release-"); najwyższy tag semver
+    local pre="${2:-}"
+    { git ls-remote --tags --refs "$1" 2>/dev/null || true; } | sed 's|.*refs/tags/||' \
+        | { grep -E "^${pre}v?[0-9]+(\.[0-9]+)+\$" || true; } | sed -E "s/^${pre}v?//" | sort -V | tail -n1
 }
-if [[ "$FFMPEG_VERSION" = latest ]]; then
-    FFMPEG_VERSION="$(wget -qO- https://ffmpeg.org/releases/ | grep -oE 'ffmpeg-[0-9]+\.[0-9]+(\.[0-9]+)?\.tar\.xz' \
-        | sed -E 's/ffmpeg-(.*)\.tar\.xz/\1/' | sort -uV | tail -n1)"
-fi
-[[ "$DOVI_TOOL_REF" = latest ]] && DOVI_TOOL_REF="$(latest_git_tag https://github.com/quietvoid/dovi_tool)"
-[[ "$HDR10PLUS_TOOL_REF" = latest ]] && HDR10PLUS_TOOL_REF="$(latest_git_tag https://github.com/quietvoid/hdr10plus_tool)"
-[[ "$DAV1D_REF" = latest ]] && DAV1D_REF="$(latest_git_tag https://code.videolan.org/videolan/dav1d.git)"
-[[ "$LIBVPL_REF" = latest ]] && LIBVPL_REF="$(latest_git_tag https://github.com/intel/libvpl.git)"
-if [[ "$MKVTOOLNIX_VERSION" = latest ]]; then
-    MKVTOOLNIX_VERSION="$(wget -qO- https://mkvtoolnix.download/windows/releases/ \
-        | grep -oE 'href="[0-9]+\.[0-9]+(\.[0-9]+)?/"' | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | sort -uV | tail -n1)"
-fi
-for v in FFMPEG_VERSION DOVI_TOOL_REF HDR10PLUS_TOOL_REF DAV1D_REF LIBVPL_REF MKVTOOLNIX_VERSION; do
-    [[ -n "${!v}" ]] || fail "nie udało się ustalić $v"
-done
+resolve() {   # $1 = nazwa zmiennej, $2 = opis źródła, reszta = polecenie wypisujące wersję
+    local name="$1" what="$2"; shift 2
+    [[ "${!name}" = latest ]] || return 0
+    local v; v="$("$@" || true)"
+    [[ -n "$v" ]] || fail "nie udało się ustalić najnowszej wersji: $name ($what) — podaj ją ręcznie, np. $name=..."
+    printf -v "$name" '%s' "$v"
+}
+ffmpeg_latest() {
+    { wget -qO- https://ffmpeg.org/releases/ || true; } | { grep -oE 'ffmpeg-[0-9]+\.[0-9]+(\.[0-9]+)?\.tar\.xz' || true; } \
+        | sed -E 's/ffmpeg-(.*)\.tar\.xz/\1/' | sort -uV | tail -n1
+}
+resolve FFMPEG_VERSION "ffmpeg.org/releases" ffmpeg_latest
+resolve DOVI_TOOL_REF "github.com/quietvoid/dovi_tool" latest_git_tag https://github.com/quietvoid/dovi_tool
+resolve HDR10PLUS_TOOL_REF "github.com/quietvoid/hdr10plus_tool" latest_git_tag https://github.com/quietvoid/hdr10plus_tool
+resolve DAV1D_REF "code.videolan.org/videolan/dav1d" latest_git_tag https://code.videolan.org/videolan/dav1d.git
+# libvpl: tylko wydania 2.x — repozytorium ma też stare tagi oneVPL "v2023.x", które sortują się wyżej.
+libvpl_latest() {
+    { git ls-remote --tags --refs https://github.com/intel/libvpl.git 2>/dev/null || true; } | sed 's|.*refs/tags/||' \
+        | { grep -E '^v2\.[0-9]+\.[0-9]+$' || true; } | sed 's/^v//' | sort -V | tail -n1
+}
+resolve LIBVPL_REF "github.com/intel/libvpl" libvpl_latest
+# MKVToolNix: tagi "release-X.Y" w repozytorium projektu (Codeberg; zapasowo GitLab).
+mkvtoolnix_latest() {
+    local v; v="$(latest_git_tag https://codeberg.org/mbunkus/mkvtoolnix.git release-)"
+    [[ -n "$v" ]] || v="$(latest_git_tag https://gitlab.com/mbunkus/mkvtoolnix.git release-)"
+    echo "$v"
+}
+resolve MKVTOOLNIX_VERSION "tagi release-* MKVToolNix" mkvtoolnix_latest
 echo "Wersje: ffmpeg $FFMPEG_VERSION, dav1d $DAV1D_REF, libvpl $LIBVPL_REF, MKVToolNix $MKVTOOLNIX_VERSION," \
      "dovi_tool $DOVI_TOOL_REF, hdr10plus_tool $HDR10PLUS_TOOL_REF"
 
