@@ -247,7 +247,7 @@ cp "$MKV/mkvtoolnix/mkvmerge.exe" "$PKG/"
 "$TRIPLE-strip" "$PKG/ffmpeg.exe" "$PKG/ffprobe.exe" "$PKG/dovi_tool.exe" "$PKG/hdr10plus_tool.exe" 2>/dev/null || true
 
 # Zależności DLL: wszystko poza bibliotekami systemu Windows musi leżeć w pakiecie.
-SYSTEM_DLL='^(kernel32|kernelbase|user32|advapi32|shell32|shlwapi|ole32|oleaut32|gdi32|ws2_32|bcrypt|bcryptprimitives|secur32|crypt32|ncrypt|ntdll|msvcrt|ucrtbase|api-ms-win-.*|ext-ms-win-.*|comdlg32|comctl32|winmm|psapi|setupapi|cfgmgr32|dxgi|d3d9|d3d11|d3d12|dxva2|mfplat|mf|mfreadwrite|evr|version|userenv|iphlpapi|dbghelp|imm32|pdh|powrprof|normaliz|wldap32|rpcrt4|winhttp|wininet|uxtheme|dwmapi|opengl32|mpr|netapi32|avrt|mscms|propsys|synchronization|winspool\.drv)\.dll$'
+SYSTEM_DLL='^(kernel32|kernelbase|user32|advapi32|shell32|shlwapi|ole32|oleaut32|gdi32|ws2_32|bcrypt|bcryptprimitives|secur32|crypt32|ncrypt|ntdll|msvcrt|ucrtbase|api-ms-win-.*|ext-ms-win-.*|comdlg32|comctl32|winmm|psapi|setupapi|cfgmgr32|dxgi|d3d9|d3d11|d3d12|dxva2|mfplat|mf|mfreadwrite|evr|version|userenv|iphlpapi|dbghelp|imm32|pdh|powrprof|normaliz|wldap32|rpcrt4|winhttp|wininet|uxtheme|dwmapi|opengl32|mpr|netapi32|avrt|mscms|propsys|synchronization|winspool\.drv|avicap32|msvfw32|msacm32|ksuser|shcore|dwrite|d2d1|d3dcompiler_47|mfcore|mfuuid|cryptbase|wintrust|hid|xinput1_4|dsound|dinput8)\.dll$'
 MINGW_DIRS=(/usr/lib/gcc/$TRIPLE/*-posix "/usr/$TRIPLE/lib")
 changed=1
 while [[ $changed = 1 ]]; do
