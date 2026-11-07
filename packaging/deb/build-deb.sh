@@ -26,6 +26,12 @@ mkdir -p "$OPT" "$PKG/DEBIAN" "$PKG/usr/bin" "$PKG/usr/share/applications" \
          "$PKG/usr/share/icons/hicolor/scalable/apps" "$PKG/usr/share/doc/videopipeline"
 
 cp -a "$APPDIR/usr/bin" "$APPDIR/usr/lib" "$OPT/"
+# W pakiecie deb libva/libdrm/oneVPL/libstdc++ zawsze z systemu (Depends niżej) — bez kopii z AppImage.
+INTEL_DEPS=""
+if compgen -G "$OPT/lib/hostfirst/libva.so*" >/dev/null; then
+    INTEL_DEPS=", libva2, libva-drm2, libdrm2, libvpl2"
+fi
+rm -rf "$OPT/lib/hostfirst"
 mkdir -p "$OPT/share"
 [[ -d "$APPDIR/usr/share/misc" ]] && cp -a "$APPDIR/usr/share/misc" "$OPT/share/"
 cp -a "$APPDIR/usr/share/licenses/videopipeline/." "$PKG/usr/share/doc/videopipeline/"
@@ -60,12 +66,12 @@ Section: video
 Priority: optional
 Architecture: amd64
 Installed-Size: ${SIZE}
-Depends: libc6 (>= 2.41), libstdc++6, libgcc-s1
-Recommends: libva2, libvpl2, intel-media-va-driver-non-free
+Depends: libc6 (>= 2.41), libstdc++6, libgcc-s1${INTEL_DEPS}
+Recommends: intel-media-va-driver-non-free | intel-media-va-driver, libmfx-gen1.2
 Suggests: nvidia-driver
 Maintainer: VideoPipeline <noreply@users.noreply.github.com>
 Homepage: https://github.com/8brzrs26ws-cloud/videopipeline
-Description: Kodowanie wideo HEVC/AV1 na GPU (NVENC) z TUI w stylu Midnight Commandera
+Description: Kodowanie wideo HEVC/AV1 na GPU (NVIDIA NVENC, Intel QSV/VAAPI) z TUI w stylu MC
  Zawiera własne kopie ffmpeg (NVENC/NVDEC/CUDA, Intel VAAPI/QSV), ffprobe, mkvmerge,
  dovi_tool i hdr10plus_tool w /opt/videopipeline. Wymaga sterownika GPU z systemu
  oraz procesora x86-64-v3 (Haswell / Zen 1 i nowsze).

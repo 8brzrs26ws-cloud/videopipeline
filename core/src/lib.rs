@@ -1,4 +1,4 @@
-//! VideoPipeline core — kompletna logika (analiza, NVENC, mux, kopiowanie, monitoring).
+//! VideoPipeline core — kompletna logika (wykrywanie GPU, analiza, NVENC/QSV/VAAPI, mux, kopiowanie, monitoring).
 //! Binarka (`videopipeline`) zawiera wyłącznie interfejs: TUI albo tryb skryptowy.
 
 /// Log pipeline'u. Zdefiniowane przed modułami, żeby było widoczne w całej bibliotece.
@@ -12,6 +12,8 @@ pub mod config;
 pub mod copy;
 pub mod encode;
 pub mod files;
+pub mod hw;
+pub mod intelmon;
 pub mod log;
 pub mod model;
 pub mod mux;

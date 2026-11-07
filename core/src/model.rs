@@ -39,8 +39,8 @@ impl State {
         match self {
             State::Waiting => "OCZEKUJE",
             State::Analysis => "ANALIZA",
-            State::Nvenc => "NVENC",
-            State::NvencDone => "NVENC_OK",
+            State::Nvenc => "KODOWANIE",
+            State::NvencDone => "ZAKODOWANE",
             State::Hdr => "HDR",
             State::Hdr10Plus => "HDR10PLUS",
             State::Dv => "DV",
@@ -154,7 +154,7 @@ pub fn enc_progress(it: &Item) -> Option<Enc> {
     Some(Enc { pct: 100.0 * out / total, cur: out / 1e6, dur: total / 1e6, prog })
 }
 
-/// Postęp całego pipeline'u dla pliku (NVENC zajmuje 10–75%).
+/// Postęp całego pipeline'u dla pliku (kodowanie zajmuje 10–75%).
 pub fn overall_pct(it: &Item, enc: &Option<Enc>) -> f64 {
     match (it.state, enc) {
         (State::Done, _) => 100.0,

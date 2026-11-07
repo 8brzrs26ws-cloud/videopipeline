@@ -35,21 +35,8 @@ fn av1_selftest(tune: &str, cq: u8, out: &Path) -> bool {
     valid
 }
 
-pub fn run(opts: &Opts) -> Result<Runtime> {
-    let progress_dir =
-        std::env::temp_dir().join(format!("dual_nvenc_pipeline.{}", std::process::id()));
-    fs::create_dir_all(&progress_dir)?;
-    let mut rt = Runtime { av1_tune: "hq".into(), denoise: Denoise::Off, progress_dir };
-
-    plog!(
-        "Kopiowanie -c: {}",
-        if opts.copy {
-            "WŁĄCZONE — wynik zostanie skopiowany do source/encoded i sprawdzony SHA-512."
-        } else {
-            "wyłączone — wynik pozostanie wyłącznie w katalogu wyjściowym."
-        }
-    );
-
+/// NVIDIA: AV1 wymaga av1_nvenc z -highbitdepth; UHQ tylko gdy sterownik je przyjmie.
+fn preflight_nvenc(opts: &Opts, rt: &mut Runtime) -> Result<()> {
     if opts.codec == Codec::Av1 {
         let enc = ffmpeg_text(&["-hide_banner", "-encoders"]);
         if !enc.lines().any(|l| l.split_whitespace().nth(1) == Some("av1_nvenc")) {
@@ -78,9 +65,74 @@ pub fn run(opts: &Opts) -> Result<Runtime> {
             opts.av1_cq
         );
         plog!("AV1 SDR 8-bit: wyjście AV1 10-bit przez -highbitdepth 1.");
-        plog!("UWAGA: tryb AV1 nie wstrzykuje Dolby Vision ani HDR10+.");
     } else {
         plog!("Kodek wideo: HEVC NVENC — CQ {}.", opts.hevc_cq);
+    }
+    Ok(())
+}
+
+/// Intel: karta (renderD), kodowanie testowe wybranego enkodera i lista dekoderów QSV.
+fn preflight_intel(opts: &Opts, rt: &mut Runtime) -> Result<()> {
+    let enc = opts.engine.encoder(opts.codec);
+    let Some(dev) = crate::hw::intel_render_node() else {
+        bail!("Nie znaleziono karty Intel (/dev/dri/renderD*) — {enc} niedostępny.");
+    };
+    if !crate::hw::test(opts.engine, opts.codec, Some(&dev)) {
+        bail!(
+            "Test {enc} na {} nie powiódł się (sterownik iHD / runtime oneVPL?). Kodowanie nie zostanie rozpoczęte.",
+            dev.display()
+        );
+    }
+    if opts.engine == Engine::Qsv {
+        rt.qsv_decoders = ffmpeg_text(&["-hide_banner", "-decoders"])
+            .lines()
+            .filter_map(|l| l.split_whitespace().nth(1))
+            .filter(|n| n.ends_with("_qsv"))
+            .map(str::to_string)
+            .collect();
+    }
+    let cq = opts.cq();
+    let quality = match (opts.engine, opts.codec) {
+        (Engine::Qsv, _) => format!("ICQ global_quality {cq}, preset veryslow"),
+        (_, Codec::Av1) => format!("CQP qp {} (CQ {cq} × 5, skala AV1 0–255)", (cq as u32 * 5).min(255)),
+        _ => format!("CQP qp {cq}"),
+    };
+    plog!("Kodek wideo: {} — {quality} — karta Intel {}.", opts.codec_label(), dev.display());
+    plog!(
+        "Dekodowanie: {} (gdy kodek źródła nie jest obsługiwany sprzętowo — CPU).",
+        if opts.engine == Engine::Qsv { "QSV" } else { "VAAPI" }
+    );
+    rt.intel_dev = Some(dev);
+    Ok(())
+}
+
+pub fn run(opts: &Opts) -> Result<Runtime> {
+    let progress_dir =
+        std::env::temp_dir().join(format!("dual_nvenc_pipeline.{}", std::process::id()));
+    fs::create_dir_all(&progress_dir)?;
+    let mut rt = Runtime {
+        av1_tune: "hq".into(),
+        denoise: Denoise::Off,
+        progress_dir,
+        intel_dev: None,
+        qsv_decoders: vec![],
+    };
+
+    plog!(
+        "Kopiowanie -c: {}",
+        if opts.copy {
+            "WŁĄCZONE — wynik zostanie skopiowany do source/encoded i sprawdzony SHA-512."
+        } else {
+            "wyłączone — wynik pozostanie wyłącznie w katalogu wyjściowym."
+        }
+    );
+
+    match opts.engine {
+        Engine::Nvenc => preflight_nvenc(opts, &mut rt)?,
+        Engine::Qsv | Engine::Vaapi => preflight_intel(opts, &mut rt)?,
+    }
+    if opts.codec == Codec::Av1 {
+        plog!("UWAGA: tryb AV1 nie wstrzykuje Dolby Vision ani HDR10+.");
     }
 
     if opts.pl_eac3 {
@@ -110,14 +162,33 @@ pub fn run(opts: &Opts) -> Result<Runtime> {
     if opts.denoise {
         let f = ffmpeg_text(&["-hide_banner", "-filters"]);
         let has = |n: &str| f.contains(n);
-        if has("bilateral_cuda") && has("hwupload_cuda") && has("hwdownload") {
-            rt.denoise = Denoise::Cuda;
-            plog!("Denoiser -d: bilateral_cuda (GPU)");
-        } else if has("hqdn3d") {
-            rt.denoise = Denoise::Cpu;
-            plog!("UWAGA: brak kompletnego zestawu filtrów CUDA — denoiser użyje hqdn3d na CPU.");
-        } else {
-            bail!("opcja -d wymaga bilateral_cuda + hwupload_cuda + hwdownload albo hqdn3d.");
+        match opts.engine {
+            Engine::Nvenc => {
+                if has("bilateral_cuda") && has("hwupload_cuda") && has("hwdownload") {
+                    rt.denoise = Denoise::Cuda;
+                    plog!("Denoiser -d: bilateral_cuda (GPU)");
+                } else if has("hqdn3d") {
+                    rt.denoise = Denoise::Cpu;
+                    plog!("UWAGA: brak kompletnego zestawu filtrów CUDA — denoiser użyje hqdn3d na CPU.");
+                } else {
+                    bail!("opcja -d wymaga bilateral_cuda + hwupload_cuda + hwdownload albo hqdn3d.");
+                }
+            }
+            Engine::Qsv => {
+                rt.denoise = Denoise::Intel;
+                plog!("Denoiser -d: vpp_qsv denoise={DENOISE_QSV_LEVEL} (GPU Intel)");
+            }
+            Engine::Vaapi => {
+                if has("denoise_vaapi") {
+                    rt.denoise = Denoise::Intel;
+                    plog!("Denoiser -d: denoise_vaapi={DENOISE_VAAPI_LEVEL} (GPU Intel)");
+                } else if has("hqdn3d") {
+                    rt.denoise = Denoise::Cpu;
+                    plog!("UWAGA: brak denoise_vaapi — denoiser użyje hqdn3d na CPU.");
+                } else {
+                    bail!("opcja -d wymaga denoise_vaapi albo hqdn3d.");
+                }
+            }
         }
     }
     Ok(rt)

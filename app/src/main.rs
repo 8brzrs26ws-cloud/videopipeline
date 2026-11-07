@@ -9,7 +9,11 @@ mod theme;
 use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
-use videopipeline_core::{config::*, files};
+use videopipeline_core::{
+    config::*,
+    files,
+    hw::{self, HwInfo},
+};
 
 #[derive(Parser)]
 #[command(
@@ -29,19 +33,28 @@ struct Cli {
     /// Skopiuj wynik do source/encoded i zweryfikuj SHA-512
     #[arg(short = 'c', long)]
     copy: bool,
-    /// Koduj przez av1_nvenc zamiast hevc_nvenc
+    /// Koduj do AV1 zamiast HEVC
     #[arg(long)]
     av1: bool,
+    /// Koduj na karcie Intel (QSV, zapasowo VAAPI). Bez NVIDII w systemie Intel jest wybierany sam
+    #[arg(long)]
+    intel: bool,
+    /// Wymuś silnik: nvenc, qsv albo vaapi (domyślnie NVIDIA NVENC, gdy jest dostępna)
+    #[arg(long, value_parser = ["nvenc", "qsv", "vaapi"])]
+    engine: Option<String>,
+    /// Pokaż wykryte enkodery GPU i zakończ
+    #[arg(long)]
+    detect: bool,
     /// Pierwsza polska ścieżka -> E-AC-3 stereo 192 kb/s
     #[arg(long)]
     pleac3: bool,
     /// Dodatkowo audio EN (E-AC-3 5.1) oraz napisy EN i PL
     #[arg(long = "da")]
     da: bool,
-    /// Jakość HEVC NVENC (-cq, mniej = lepiej; domyślnie 19)
+    /// Jakość HEVC — CQ (mniej = lepiej; domyślnie 19)
     #[arg(long = "hevc-cq", value_parser = clap::value_parser!(u8).range(1..=51))]
     hevc_cq: Option<u8>,
-    /// Jakość AV1 NVENC (-cq, mniej = lepiej; domyślnie 25)
+    /// Jakość AV1 — CQ (mniej = lepiej; domyślnie 25)
     #[arg(long = "av1-cq", value_parser = clap::value_parser!(u8).range(1..=51))]
     av1_cq: Option<u8>,
     /// Jakość dla wybranego kodeka (skrót: ustawia --hevc-cq albo --av1-cq zależnie od --av1)
@@ -92,6 +105,28 @@ fn prepend_bundled_tools_to_path() {
     }
 }
 
+/// Silnik: --engine > --intel (QSV, zapasowo VAAPI) > domyślny (NVIDIA, a bez niej Intel).
+fn pick_engine(cli: &Cli, hw: &HwInfo, codec: Codec) -> std::result::Result<Engine, String> {
+    if let Some(e) = cli.engine.as_deref().and_then(Engine::from_name) {
+        return if hw.has(e, codec) {
+            Ok(e)
+        } else {
+            Err(format!(
+                "{} {} nie działa w tym systemie (wykryte: {}).",
+                codec.label(),
+                e.label(),
+                hw.summary()
+            ))
+        };
+    }
+    if cli.intel {
+        return hw.intel_engine(codec).ok_or_else(|| {
+            format!("Brak działającego enkodera Intel dla {} (wykryte: {}).", codec.label(), hw.summary())
+        });
+    }
+    hw.default_engine(codec)
+}
+
 fn real_main() -> Result<i32> {
     prepend_bundled_tools_to_path();
     // Zachowujemy składnię V9: -av1 / -pleac3 / -da (+ nowe -nocrop / -nodv / -nohdr10plus).
@@ -102,13 +137,39 @@ fn real_main() -> Result<i32> {
         "-pc" | "-nocrop" => "--no-crop".to_string(),
         "-pdv" | "-nodv" => "--no-dv".to_string(),
         "-ph" | "-nohdr10plus" => "--no-hdr10plus".to_string(),
+        "-intel" => "--intel".to_string(),
+        "-nvenc" => "--engine=nvenc".to_string(),
+        "-qsv" => "--engine=qsv".to_string(),
+        "-vaapi" => "--engine=vaapi".to_string(),
         _ => a,
     });
     let cli = Cli::parse_from(args);
+    let codec = if cli.av1 { Codec::Av1 } else { Codec::Hevc };
+    let script = !cli.tui && (!cli.paths.is_empty() || cli.batch);
+
+    if cli.detect {
+        let hw = hw::detect();
+        println!("Wykryte enkodery: {}", hw.summary());
+        if let Some(d) = &hw.intel_dev {
+            println!("Karta Intel: {}", d.display());
+        }
+        return Ok(0);
+    }
+
+    // TUI uruchomione dwuklikiem nie ma terminala — najpierw własne okno, dopiero potem wykrywanie.
+    if !script {
+        if let Some(code) = term::relaunch_in_terminal() {
+            return Ok(code);
+        }
+    }
+    eprintln!("Wykrywanie enkoderów GPU…");
+    let hw = hw::detect();
+    let picked = pick_engine(&cli, &hw, codec);
 
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
     let opts = Opts {
-        codec: if cli.av1 { Codec::Av1 } else { Codec::Hevc },
+        codec,
+        engine: *picked.as_ref().unwrap_or(&Engine::Nvenc),
         hevc_cq: cli.hevc_cq.or(if cli.av1 { None } else { cli.cq }).unwrap_or(DEFAULT_HEVC_CQ),
         av1_cq: cli.av1_cq.or(if cli.av1 { cli.cq } else { None }).unwrap_or(DEFAULT_AV1_CQ),
         pl_eac3: cli.pleac3,
@@ -123,15 +184,16 @@ fn real_main() -> Result<i32> {
     };
 
     // Tryb skryptowy: żadnego ratatui, tylko zwykły tekst — mniej RAM-u.
-    if !cli.tui && (!cli.paths.is_empty() || cli.batch) {
+    if script {
+        println!("Wykryte enkodery: {}", hw.summary());
+        let opts = match picked {
+            Ok(_) => opts,
+            Err(e) => anyhow::bail!("{e}"),
+        };
         let paths = if cli.paths.is_empty() { vec![PathBuf::from(".")] } else { cli.paths };
         return cli::run(opts, paths);
     }
 
-    // TUI. Uruchomienie z menedżera plików (dwuklik) nie ma terminala — otwórz własne okno.
-    if let Some(code) = term::relaunch_in_terminal() {
-        return Ok(code);
-    }
     let _pause = term::PauseOnExit::new(); // gdy okno terminala było nasze: pokaż błąd przed zamknięciem
 
     let (start_dir, initial) = if cli.paths.is_empty() {
@@ -147,7 +209,10 @@ fn real_main() -> Result<i32> {
         (dir, initial)
     };
 
-    let mut app = app::App::new(opts, start_dir, initial);
+    let mut app = app::App::new(opts, hw, start_dir, initial);
+    if let Err(e) = picked {
+        app.status_msg = format!("{e} Wybierz kodek w F7.");
+    }
     app::run(&mut app)?;
 
     if app.do_shutdown {

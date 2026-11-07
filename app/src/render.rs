@@ -9,6 +9,7 @@ use videopipeline_core::{
     log,
     model::{enc_progress, hms, overall_pct, Enc, Item, Snapshot, State},
     pipeline::RunStatus,
+    intelmon::IntelStats,
     sysmon::SysStats,
 };
 use ratatui::{
@@ -21,12 +22,12 @@ use ratatui::{
 use std::time::{Instant, SystemTime};
 
 const OPTION_HELP: [&str; OPTION_COUNT] = [
-    "HEVC: obsługa DV/HDR10+ (dovi_tool). AV1: 10-bit, bez DV/HDR10+.",
-    "Jakość HEVC (NVENC -cq): mniej = lepsza jakość i większy plik. ←/→ ±1, PgUp/PgDn ±5.",
-    "Jakość AV1 (NVENC -cq): mniej = lepsza jakość i większy plik. ←/→ ±1, PgUp/PgDn ±5.",
+    "", // wiersz 0: opis budowany dynamicznie (wykryte enkodery)
+    "Jakość HEVC: NVENC -cq, QSV ICQ, VAAPI QP; mniej = lepsza jakość. ←/→ ±1, PgUp/PgDn ±5.",
+    "Jakość AV1: NVENC -cq, QSV ICQ, VAAPI QP×5; mniej = lepsza jakość. ←/→ ±1, PgUp/PgDn ±5.",
     "Pierwsza polska ścieżka przekodowana do E-AC-3 2.0 192 kb/s.",
     "Bez tego: tylko polska ścieżka audio i brak napisów.",
-    "bilateral_cuda (GPU) albo hqdn3d (CPU); tylko źródła SDR 8-bit.",
+    "NVIDIA: bilateral_cuda, Intel: vpp_qsv/denoise_vaapi, zapasowo hqdn3d (CPU); tylko SDR 8-bit.",
     "Bez cropdetect: pełny kadr, najdłuższy etap analizy jest pomijany.",
     "Bez ekstrakcji i wstrzykiwania Dolby Vision — wynik zostaje zwykłym HDR10.",
     "Bez ekstrakcji i wstrzykiwania HDR10+ — zostaje statyczny HDR10.",
@@ -177,10 +178,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 }
 
 fn summary(o: &Opts) -> String {
-    let mut parts: Vec<String> = vec![String::from(match o.codec {
-        Codec::Hevc => "HEVC NVENC",
-        Codec::Av1 => "AV1 NVENC",
-    })];
+    let mut parts: Vec<String> = vec![o.codec_label()];
     parts.push(format!("CQ {}", o.cq()));
     parts.push(String::from(if o.pl_eac3 { "audio PL E-AC-3 192k" } else { "audio PL (kopia)" }));
     if o.extra {
@@ -329,15 +327,7 @@ fn render_right(f: &mut Frame, area: Rect, q: &mut Queue, snap: &Snapshot, activ
         f.render_stateful_widget(list, parts[1], &mut q.state);
     }
 
-    let foot = format!(
-        "Razem: {} · {} · {}",
-        q.items.len(),
-        human(q.total_size()),
-        match o.codec {
-            Codec::Hevc => "HEVC",
-            Codec::Av1 => "AV1",
-        }
-    );
+    let foot = format!("Razem: {} · {} · {}", q.items.len(), human(q.total_size()), o.codec_label());
     f.render_widget(Paragraph::new(Line::from(Span::styled(trunc(&foot, inner.width as usize), fg(DIM)))), parts[2]);
 }
 
@@ -392,13 +382,11 @@ fn render_options(f: &mut Frame, area: Rect, app: &App) {
     let rows: Vec<(String, String)> = vec![
         (
             "Kodek wideo".into(),
-            format!(
-                "< {} >",
-                match o.codec {
-                    Codec::Hevc => "HEVC NVENC",
-                    Codec::Av1 => "AV1 NVENC",
-                }
-            ),
+            if app.hw.has(o.engine, o.codec) {
+                format!("< {} >", o.codec_label())
+            } else {
+                format!("< {} — niedostępny >", o.codec_label())
+            },
         ),
         ("Jakość HEVC — CQ   (--hevc-cq)".into(), format!("< {} >", o.hevc_cq)),
         ("Jakość AV1 — CQ   (--av1-cq)".into(), format!("< {} >", o.av1_cq)),
@@ -421,10 +409,12 @@ fn render_options(f: &mut Frame, area: Rect, app: &App) {
         lines.push(Line::from(Span::styled(text, style)));
     }
     lines.push(Line::default());
-    lines.push(Line::from(Span::styled(
-        format!(" {}", trunc(OPTION_HELP[app.opt_cursor.min(OPTION_COUNT - 1)], w.saturating_sub(2))),
-        fg(DIM),
-    )));
+    let help = if app.opt_cursor == 0 {
+        format!("Wykryte: {}. HEVC: DV/HDR10+; AV1: 10-bit, bez DV/HDR10+.", app.hw.summary())
+    } else {
+        OPTION_HELP[app.opt_cursor.min(OPTION_COUNT - 1)].to_string()
+    };
+    lines.push(Line::from(Span::styled(format!(" {}", trunc(&help, w.saturating_sub(2))), fg(DIM))));
     lines.push(Line::default());
     lines.push(Line::from(Span::styled(
         " ↑↓ wybór · Spacja/Enter/←→ zmień · CQ: ←→ ±1, PgUp/PgDn ±5 · Esc/F7 zamknij",
@@ -455,7 +445,7 @@ fn render_help(f: &mut Frame, area: Rect) {
         k("Enter", "katalog: wejdź · plik: dodaj do kolejki"),
         k("Backspace", "katalog wyżej"),
         k("F5", "dodaj zaznaczone (lub bieżący) do kolejki"),
-        k("F7", "opcje: kodek, audio, odszumianie, pomijanie analiz…"),
+        k("F7", "opcje: kodek i karta (NVENC/QSV/VAAPI), audio, analizy…"),
         k("F8 / Del", "usuń zaznaczone (lub bieżący) z kolejki"),
         k("F9", "uruchom kodowanie"),
         k("F10 / Ctrl+C", "wyjście"),
@@ -509,7 +499,15 @@ fn render_run(f: &mut Frame, area: Rect, app: &App) {
     }
     let used = lines.len();
     let show_sys = matches!(status, RunStatus::Running);
-    lines.extend(run_lines(&app.snapshot, &app.sys, show_sys, cw, (body.height as usize).saturating_sub(used)));
+    let eng = app.run.as_ref().map(|r| r.opts.engine).unwrap_or(app.opts.engine);
+    lines.extend(run_lines(
+        &app.snapshot,
+        &app.sys,
+        eng.label(),
+        show_sys,
+        cw,
+        (body.height as usize).saturating_sub(used),
+    ));
     lines.truncate(body.height as usize);
     f.render_widget(Paragraph::new(lines), body);
 
@@ -529,7 +527,14 @@ fn render_run(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(Paragraph::new(Line::from(hint)), parts[1]);
 }
 
-fn run_lines(snap: &Snapshot, sys: &SysStats, show_sys: bool, cw: usize, h: usize) -> Vec<Line<'static>> {
+fn run_lines(
+    snap: &Snapshot,
+    sys: &SysStats,
+    engine: &str,
+    show_sys: bool,
+    cw: usize,
+    h: usize,
+) -> Vec<Line<'static>> {
     let mut out: Vec<Line<'static>> = vec![];
 
     let rows: Vec<(&String, &Item, f64, Option<Enc>)> = snap
@@ -572,7 +577,7 @@ fn run_lines(snap: &Snapshot, sys: &SysStats, show_sys: bool, cw: usize, h: usiz
     ]));
     out.push(Line::default());
 
-    // --- obciążenie: GPU / NVENC / NVDEC / VRAM / CPU / RAM -----------------------
+    // --- obciążenie: GPU (NVIDIA albo Intel) / CPU / RAM ---------------------------
     if show_sys && h >= 16 {
         out.extend(sys_lines(sys, cw));
         out.push(Line::default());
@@ -608,7 +613,7 @@ fn run_lines(snap: &Snapshot, sys: &SysStats, show_sys: bool, cw: usize, h: usiz
         l1.push(pct_span(r.2));
         out.push(Line::from(l1));
 
-        let mut l2 = vec![Span::styled("NVENC ", fg(DIM))];
+        let mut l2 = vec![Span::styled(pad(engine, 6), fg(DIM))];
         l2.extend(meter(e.pct, mw));
         l2.push(pct_span(e.pct));
         out.push(Line::from(l2));
@@ -696,7 +701,36 @@ fn pair(mut a: Vec<Span<'static>>, b: Vec<Span<'static>>) -> Line<'static> {
     Line::from(a)
 }
 
+/// Intel: VIDEO = blok VDBox (koduje i dekoduje — sprzętowo jedna jednostka), VPP = VEBox (filtry vpp).
+fn intel_lines(s: &SysStats, i: &IntelStats, cw: usize) -> Vec<Line<'static>> {
+    let w = cw.saturating_sub(3) / 2;
+    let gib = |b: u64| b as f64 / (1024.0 * 1024.0 * 1024.0);
+    let freq = match (i.freq_mhz, i.freq_max_mhz) {
+        (Some(c), Some(m)) => format!(" · {c}/{m} MHz"),
+        (Some(c), None) => format!(" · {c} MHz"),
+        _ => String::new(),
+    };
+    let (ram_pct, ram_txt) = match (s.ram_used, s.ram_total) {
+        (Some(u), Some(t)) if t > 0 => (Some(100.0 * u as f64 / t as f64), format!("{:.1}/{:.1}G", gib(u), gib(t))),
+        _ => (None, String::new()),
+    };
+    let mem = match i.mem_bytes {
+        Some(b) => format!("pamięć GPU (ffmpeg): {:.2}G", gib(b)),
+        None => "pamięć GPU: brak danych".into(),
+    };
+    let header = format!("─ obciążenie · {}{freq}", i.name);
+    vec![
+        Line::from(Span::styled(trunc(&header, cw), fg(BOX_QUEUE))),
+        pair(half("VIDEO", i.video, "kod+dek", w), half("VPP", i.enhance, "", w)),
+        pair(half("RENDER", i.render, "", w), half("CPU", s.cpu, "", w)),
+        pair(half("RAM", ram_pct, &ram_txt, w), vec![Span::styled(pad(&mem, w), fg(DIM))]),
+    ]
+}
+
 fn sys_lines(s: &SysStats, cw: usize) -> Vec<Line<'static>> {
+    if let Some(i) = &s.intel {
+        return intel_lines(s, i, cw);
+    }
     let w = cw.saturating_sub(3) / 2;
     let g = s.gpu.as_ref();
     let gib = |b: u64| b as f64 / (1024.0 * 1024.0 * 1024.0);

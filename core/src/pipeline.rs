@@ -1,4 +1,4 @@
-//! Wątek roboczy: pre-flight -> analiza -> NVENC -> mux (logika z V9).
+//! Wątek roboczy: pre-flight -> analiza -> kodowanie GPU (NVENC/QSV/VAAPI) -> mux (logika z V9).
 use crate::{
     analysis::{self, Analysis},
     config::*,
@@ -48,7 +48,7 @@ fn run(opts: &Opts, files: &[PathBuf], panel: &Panel) -> Result<()> {
         }
     }
     panel.draw("PRE-FLIGHT");
-    plog!("Pre-flight: sprawdzam FFmpeg / NVENC...");
+    plog!("Pre-flight: sprawdzam FFmpeg / {}...", opts.engine.label());
     let rt = preflight::run(opts)?;
     let res = stages(opts, &rt, files, panel);
     let _ = fs::remove_dir_all(&rt.progress_dir);
@@ -107,8 +107,8 @@ fn stages(opts: &Opts, rt: &Runtime, files: &[PathBuf], panel: &Panel) -> Result
         }
     }
 
-    // ===== ETAP 2: NVENC =======================================================
-    plog!("ETAP 2/3: KODOWANIE WIDEO (DUAL NVENC)");
+    // ===== ETAP 2: kodowanie GPU ================================================
+    plog!("ETAP 2/3: KODOWANIE WIDEO (DUAL {})", opts.engine.label());
     // Tylko pliki z bieżącej kolejki (katalog wyjściowy może zawierać stare analizy).
     let loaded: Vec<(PathBuf, Analysis)> = opts
         .list_analysis_files()

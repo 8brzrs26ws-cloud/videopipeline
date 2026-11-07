@@ -17,12 +17,9 @@ use videopipeline_core::{
 };
 
 fn summary(o: &Opts) -> String {
-    let mut p: Vec<&str> = vec![match o.codec {
-        Codec::Hevc => "HEVC NVENC",
-        Codec::Av1 => "AV1 NVENC",
-    }];
+    let label = o.codec_label();
     let cq = format!("CQ {}", o.cq());
-    p.push(&cq);
+    let mut p: Vec<&str> = vec![label.as_str(), cq.as_str()];
     if o.pl_eac3 {
         p.push("PL E-AC-3 192k");
     }
@@ -72,6 +69,7 @@ pub fn run(opts: Opts, paths: Vec<PathBuf>) -> Result<i32> {
     let status: SharedStatus = Arc::new(Mutex::new(RunStatus::Running));
     let handle = pipeline::spawn(opts.clone(), list, panel.clone(), status.clone());
 
+    let eng = opts.engine.label();
     let mut last: HashMap<String, State> = HashMap::new();
     let mut last_progress = Instant::now();
     loop {
@@ -96,7 +94,7 @@ pub fn run(opts: Opts, paths: Vec<PathBuf>) -> Result<i32> {
                 }
                 if let Some(e) = enc_progress(it) {
                     println!(
-                        "    [{name}] NVENC {:.1}% · {} fps · {} · ETA {}",
+                        "    [{name}] {eng} {:.1}% · {} fps · {} · ETA {}",
                         e.pct,
                         e.prog.fps.clone().unwrap_or_else(|| "--".into()),
                         e.prog.speed.clone().unwrap_or_else(|| "--".into()),

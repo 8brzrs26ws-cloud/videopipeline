@@ -19,6 +19,46 @@ if [ -n "$flags" ] && [ -n "$missing" ]; then
 fi
 
 export PATH="$APPDIR/usr/bin:$PATH"
+
+# libva / libdrm / oneVPL / libstdc++ bierzemy z systemu (muszą pasować do sterownika Intel iHD
+# i runtime'u oneVPL). Kopie z obrazu (usr/lib/hostfirst) podsuwamy tylko tym bibliotekom,
+# których w systemie brak — np. libvpl na komputerze z samą kartą NVIDIA.
+HF="$APPDIR/usr/lib/hostfirst"
+if [ -d "$HF" ]; then
+    has_host_lib() {
+        for d in /usr/lib/x86_64-linux-gnu /lib/x86_64-linux-gnu /usr/lib64 /lib64 /usr/lib /lib; do
+            [ -e "$d/$1" ] && return 0
+        done
+        return 1
+    }
+    BASE="${XDG_RUNTIME_DIR:-/tmp}"
+    # Sprzątanie po zakończonych uruchomieniach (katalog na PID procesu).
+    for d in "$BASE"/videopipeline-libs-*; do
+        [ -d "$d" ] || continue
+        [ -d "/proc/${d##*-}" ] || rm -rf "$d"
+    done
+    FB="$BASE/videopipeline-libs-$$"
+    missing=""
+    for f in "$HF"/*; do
+        n="$(basename "$f")"
+        if ! has_host_lib "$n"; then
+            mkdir -p "$FB"
+            ln -sf "$f" "$FB/$n"
+            missing="$missing $n"
+        fi
+    done
+    if [ -n "$missing" ]; then
+        export LD_LIBRARY_PATH="$FB${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        # libva z obrazu nie zna ścieżki sterowników hosta.
+        if [ -e "$FB/libva.so.2" ] && [ -z "${LIBVA_DRIVERS_PATH:-}" ]; then
+            drv=""
+            for d in /usr/lib/x86_64-linux-gnu/dri /usr/lib64/dri /usr/lib/dri; do
+                [ -d "$d" ] && drv="${drv:+$drv:}$d"
+            done
+            [ -n "$drv" ] && export LIBVA_DRIVERS_PATH="$drv"
+        fi
+    fi
+fi
 # libmagic (mkvmerge) bez systemowej bazy typów plików na hoście.
 if [ -f "$APPDIR/usr/share/misc/magic.mgc" ]; then
     export MAGIC="$APPDIR/usr/share/misc/magic.mgc"

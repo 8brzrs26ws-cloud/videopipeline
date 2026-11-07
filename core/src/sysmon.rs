@@ -1,6 +1,12 @@
-//! Monitoring obciążenia: GPU/NVENC/NVDEC/VRAM (nvidia-smi w pętli), CPU i RAM (/proc).
+//! Monitoring obciążenia: NVIDIA GPU/NVENC/NVDEC/VRAM (nvidia-smi w pętli), Intel VIDEO/VPP/RENDER
+//! (fdinfo naszych procesów ffmpeg — patrz intelmon), CPU i RAM (/proc).
+use crate::{
+    config::Engine,
+    intelmon::{IntelSampler, IntelStats},
+};
 use std::{
     fs,
+    path::Path,
     io::{BufRead, BufReader},
     process::{Command, Stdio},
     sync::{
@@ -22,7 +28,10 @@ pub struct GpuStats {
 
 #[derive(Clone, Default, Debug)]
 pub struct SysStats {
+    /// NVIDIA (silnik NVENC)
     pub gpu: Option<GpuStats>,
+    /// Intel (silniki QSV/VAAPI)
+    pub intel: Option<IntelStats>,
     /// Użycie CPU w % (cały system).
     pub cpu: Option<f64>,
     pub ram_used: Option<u64>,
@@ -109,6 +118,7 @@ fn gpu_thread(slot: Arc<Mutex<Option<GpuStats>>>, pid: Arc<Mutex<Option<u32>>>, 
 }
 
 pub struct Monitor {
+    intel: Option<IntelSampler>,
     gpu: Arc<Mutex<Option<GpuStats>>>,
     pid: Arc<Mutex<Option<u32>>>,
     stop: Arc<AtomicBool>,
@@ -117,22 +127,29 @@ pub struct Monitor {
 }
 
 impl Monitor {
-    /// Uruchamia nvidia-smi w pętli (jeden proces na cały czas pracy, nie na każdy odczyt).
-    pub fn start() -> Self {
+    /// NVENC: nvidia-smi w pętli (jeden proces na cały czas pracy, nie na każdy odczyt).
+    /// QSV/VAAPI: odczyty fdinfo karty Intel `intel_dev` przy każdym `sample()`.
+    pub fn start(engine: Engine, intel_dev: Option<&Path>) -> Self {
         let gpu = Arc::new(Mutex::new(None));
         let pid = Arc::new(Mutex::new(None));
         let stop = Arc::new(AtomicBool::new(false));
-        let thread = {
+        let (thread, intel) = if engine.is_intel() {
+            (None, Some(IntelSampler::new(intel_dev)))
+        } else {
             let (g, p, s) = (gpu.clone(), pid.clone(), stop.clone());
-            Some(thread::spawn(move || gpu_thread(g, p, s)))
+            (Some(thread::spawn(move || gpu_thread(g, p, s))), None)
         };
-        Monitor { gpu, pid, stop, thread, prev_cpu: read_cpu() }
+        Monitor { intel, gpu, pid, stop, thread, prev_cpu: read_cpu() }
     }
 
     /// Wołać ~1x/s. CPU liczone z różnicy odczytów /proc/stat.
     pub fn sample(&mut self) -> SysStats {
         let mut s = SysStats::default();
         s.gpu = self.gpu.lock().ok().and_then(|g| g.clone());
+        if let Some(i) = self.intel.as_mut() {
+            let pids: Vec<u32> = crate::proc::PIDS.lock().map(|g| g.clone()).unwrap_or_default();
+            s.intel = Some(i.sample(&pids));
+        }
 
         if let Some((total, idle)) = read_cpu() {
             if let Some((pt, pi)) = self.prev_cpu {

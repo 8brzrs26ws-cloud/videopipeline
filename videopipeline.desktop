@@ -2,7 +2,7 @@
 Type=Application
 Name=VideoPipeline
 GenericName=Kodowanie wideo
-Comment=HEVC/AV1 NVENC, Dolby Vision, HDR10+ — interfejs w stylu Midnight Commandera
+Comment=Kodowanie HEVC/AV1 na GPU (NVIDIA NVENC, Intel QSV/VAAPI) — Dolby Vision, HDR10+, TUI w stylu MC
 # Ścieżki wpisuje install.sh (Exec=/pełna/ścieżka/videopipeline).
 Exec=__EXEC__
 TryExec=__EXEC__

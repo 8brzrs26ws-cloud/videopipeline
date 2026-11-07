@@ -5,6 +5,7 @@ use crate::{
 };
 use videopipeline_core::{
     config::*,
+    hw::HwInfo,
     log,
     model::{Panel, Snapshot, State},
     pipeline::{self, RunStatus, SharedStatus},
@@ -55,6 +56,8 @@ pub struct RunCtx {
 
 pub struct App {
     pub opts: Opts,
+    /// Wykryte enkodery GPU (przy starcie).
+    pub hw: HwInfo,
     pub browser: Browser,
     pub queue: Queue,
     pub focus: Focus,
@@ -73,9 +76,10 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(opts: Opts, start: PathBuf, initial: Vec<PathBuf>) -> Self {
+    pub fn new(opts: Opts, hw: HwInfo, start: PathBuf, initial: Vec<PathBuf>) -> Self {
         let mut app = App {
             opts,
+            hw,
             browser: Browser::new(start),
             queue: Queue::new(),
             focus: Focus::Left,
@@ -131,6 +135,14 @@ impl App {
             self.status_msg = "Kolejka jest pusta — zaznacz pliki w lewym panelu i naciśnij F5".into();
             return;
         }
+        if !self.hw.has(self.opts.engine, self.opts.codec) {
+            self.status_msg = format!(
+                "{} nie działa w tym systemie (wykryte: {}) — zmień kodek w F7",
+                self.opts.codec_label(),
+                self.hw.summary()
+            );
+            return;
+        }
         proc::set_cancel(false);
         log::clear();
         let files: Vec<PathBuf> = self.queue.items.iter().map(|q| q.path.clone()).collect();
@@ -147,7 +159,7 @@ impl App {
         self.snapshot = Snapshot::default();
         self.shutdown_at = None;
         self.sys = SysStats::default();
-        self.monitor = Some(Monitor::start());
+        self.monitor = Some(Monitor::start(self.opts.engine, self.hw.intel_dev.as_deref()));
         self.mode = Mode::Running;
     }
 
@@ -418,18 +430,35 @@ impl App {
         match self.opt_cursor {
             OPT_HEVC_CQ => self.opts.hevc_cq = bump(self.opts.hevc_cq),
             OPT_AV1_CQ => self.opts.av1_cq = bump(self.opts.av1_cq),
+            0 => self.cycle_codec(if d < 0 { -1 } else { 1 }),
             _ => self.toggle_option(),
         }
     }
 
+    /// Kodek + silnik: przełącza między działającymi kombinacjami (np. HEVC NVENC → AV1 NVENC → HEVC QSV).
+    fn cycle_codec(&mut self, d: i32) {
+        let combos = self.hw.combos();
+        if combos.is_empty() {
+            // Bez wykrytych enkoderów: przynajmniej przełącz kodek.
+            self.opts.codec = match self.opts.codec {
+                Codec::Hevc => Codec::Av1,
+                Codec::Av1 => Codec::Hevc,
+            };
+            return;
+        }
+        let n = combos.len() as i32;
+        let next = match combos.iter().position(|c| *c == (self.opts.engine, self.opts.codec)) {
+            Some(i) => (i as i32 + d).rem_euclid(n),
+            None => 0,
+        };
+        let (e, c) = combos[next as usize];
+        self.opts.engine = e;
+        self.opts.codec = c;
+    }
+
     fn toggle_option(&mut self) {
         match self.opt_cursor {
-            0 => {
-                self.opts.codec = match self.opts.codec {
-                    Codec::Hevc => Codec::Av1,
-                    Codec::Av1 => Codec::Hevc,
-                }
-            }
+            0 => self.cycle_codec(1),
             // 1, 2: wiersze CQ — zmieniane strzałkami (Enter/Spacja nic nie robią)
             3 => self.opts.pl_eac3 = !self.opts.pl_eac3,
             4 => self.opts.extra = !self.opts.extra,

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Buduje dist/VideoPipeline-<wersja>-x86_64_v3.AppImage z dołączonymi narzędziami:
-#   ffmpeg + ffprobe (NVENC/NVDEC/CUDA-LLVM, statycznie), mkvmerge, dovi_tool, hdr10plus_tool.
+#   ffmpeg + ffprobe (NVENC/NVDEC/CUDA-LLVM statycznie; Intel QSV/VAAPI z libva/libvpl linkowanymi dynamicznie),
+#   mkvmerge, dovi_tool, hdr10plus_tool.
 # Kod własny (videopipeline, biblioteka core, dovi_tool, hdr10plus_tool, ffmpeg) jest kompilowany
 # z -march/-C target-cpu=x86-64-v3. Sterowniki NVIDIA pochodzą z hosta i NIE są dołączane.
 #
@@ -83,16 +84,16 @@ fi
 
 # --------------------------------------------------------------------------- 3. ffmpeg
 log "3/5 ffmpeg $FFMPEG_VERSION (statyczny, NVENC/NVDEC/CUDA-LLVM + Intel VAAPI/QSV jeśli dostępne, $TARGET_CPU)"
-# Intel (VAAPI + QSV przez libvpl): wymaga statycznych libva/libvpl; sterownik VA (iHD) zostaje po stronie hosta.
+# Intel (VAAPI + QSV przez oneVPL): libva, libdrm i libvpl są linkowane dynamicznie (Debian nie ma ich
+# wersji statycznych, a i tak muszą pasować do sterownika iHD i runtime'u oneVPL hosta — patrz AppRun).
 intel_available() {
-    pkg-config --exists libva libva-drm vpl 2>/dev/null || return 1
-    [[ -f "$(pkg-config --variable=libdir libva)/libva.a" && -f "$(pkg-config --variable=libdir vpl)/libvpl.a" ]]
+    pkg-config --exists libva libva-drm libdrm vpl 2>/dev/null
 }
 USE_INTEL=0
 case "$INTEL" in
     0) ;;
-    1) intel_available || fail "INTEL=1, ale brak statycznych libva/libvpl (libva-dev, libvpl-dev)"; USE_INTEL=1 ;;
-    *) if intel_available; then USE_INTEL=1; else echo "UWAGA: brak statycznych libva/libvpl — ffmpeg bez Intela"; fi ;;
+    1) intel_available || fail "INTEL=1, ale brak libva/libdrm/libvpl (libva-dev, libdrm-dev, libvpl-dev)"; USE_INTEL=1 ;;
+    *) if intel_available; then USE_INTEL=1; else echo "UWAGA: brak libva/libdrm/libvpl (-dev) — ffmpeg bez Intela"; fi ;;
 esac
 
 NVH="$CACHE/nv-codec-headers"
@@ -101,7 +102,7 @@ prefix_for() { echo "$CACHE/ffmpeg-$FFMPEG_VERSION-gpl$([[ $1 = 1 ]] && echo -in
 build_ffmpeg() {   # $1 = 1|0 (Intel); prefiks = prefix_for $1
     local intel="$1" prefix; prefix="$(prefix_for "$1")"
     local extra=()
-    [[ "$intel" = 1 ]] && extra=(--enable-vaapi --enable-libvpl)
+    [[ "$intel" = 1 ]] && extra=(--enable-vaapi --enable-libdrm --enable-libvpl)
     rm -rf "$NVH" "$WORK/nv-codec-headers"
     git clone --quiet https://github.com/FFmpeg/nv-codec-headers.git "$WORK/nv-codec-headers"
     [[ -n "$NVCODEC_HEADERS_REF" ]] && git -C "$WORK/nv-codec-headers" checkout --quiet "$NVCODEC_HEADERS_REF"
@@ -156,8 +157,15 @@ for f in hwupload_cuda hwdownload bilateral_cuda hqdn3d cropdetect; do
     grep -qw "$f" <<<"$FILTERS" || fail "ffmpeg bez filtra $f"
 done
 if [[ "$USE_INTEL" = 1 || "$FFPREFIX" == *-intel ]]; then
-    for e in hevc_qsv av1_qsv hevc_vaapi; do
+    for e in hevc_qsv av1_qsv hevc_vaapi av1_vaapi; do
         grep -qw "$e" <<<"$ENCODERS" || fail "ffmpeg (Intel) bez enkodera $e"
+    done
+    for f in vpp_qsv scale_vaapi denoise_vaapi hwupload; do
+        grep -qw "$f" <<<"$FILTERS" || fail "ffmpeg (Intel) bez filtra $f"
+    done
+    DECODERS="$("$FFMPEG" -hide_banner -decoders 2>/dev/null)"
+    for d in h264_qsv hevc_qsv av1_qsv; do
+        grep -qw "$d" <<<"$DECODERS" || fail "ffmpeg (Intel) bez dekodera $d"
     done
     echo "ffmpeg: Intel VAAPI + QSV włączone"
 fi
@@ -222,6 +230,7 @@ export LINUXDEPLOY_OUTPUT_VERSION="$VERSION"
 (
     cd "$WORK"
     rm -f VideoPipeline-*.AppImage
+    # Najpierw samo wdrożenie bibliotek (bez obrazu) — potem przenosimy część z nich do usr/lib/hostfirst.
     "$BIN/linuxdeploy-x86_64.AppImage" \
         --appdir "$APPDIR" \
         --executable "$APPDIR/usr/bin/videopipeline" \
@@ -232,8 +241,20 @@ export LINUXDEPLOY_OUTPUT_VERSION="$VERSION"
         --executable "$APPDIR/usr/bin/hdr10plus_tool" \
         --desktop-file "$APPDIR/usr/share/applications/videopipeline.desktop" \
         --icon-file "$ROOT/icons/videopipeline-256.png" --icon-filename videopipeline \
-        --custom-apprun "$ROOT/packaging/appimage/AppRun" \
-        --output appimage
+        --custom-apprun "$ROOT/packaging/appimage/AppRun"
+
+    # Biblioteki, które mają pochodzić z systemu: libva/libdrm/oneVPL muszą pasować do sterownika iHD
+    # i runtime'u oneVPL hosta, a libstdc++/libgcc_s do bibliotek hosta ładowanych przez te sterowniki.
+    # Kopie trafiają do usr/lib/hostfirst; AppRun podsuwa je tylko wtedy, gdy w systemie ich brak.
+    mkdir -p "$APPDIR/usr/lib/hostfirst"
+    shopt -s nullglob
+    for f in "$APPDIR"/usr/lib/{libva.so,libva-drm.so,libdrm.so,libvpl.so,libstdc++.so,libgcc_s.so}*; do
+        mv -f "$f" "$APPDIR/usr/lib/hostfirst/"
+    done
+    shopt -u nullglob
+    echo "hostfirst: $(ls "$APPDIR/usr/lib/hostfirst" | tr '\n' ' ')"
+
+    "$BIN/linuxdeploy-plugin-appimage" --appdir "$APPDIR"
 )
 
 shopt -s nullglob

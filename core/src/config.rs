@@ -16,6 +16,75 @@ impl Codec {
             Codec::Av1 => "av1",
         }
     }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Codec::Hevc => "HEVC",
+            Codec::Av1 => "AV1",
+        }
+    }
+}
+
+/// Sprzętowy silnik kodujący. NVIDIA: NVENC (+ dekodowanie NVDEC/CUDA).
+/// Intel: QSV (oneVPL, + dekodowanie QSV) — domyślny; VAAPI — zapasowy.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Engine {
+    Nvenc,
+    Qsv,
+    Vaapi,
+}
+
+impl Engine {
+    pub const ALL: [Engine; 3] = [Engine::Nvenc, Engine::Qsv, Engine::Vaapi];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Engine::Nvenc => "NVENC",
+            Engine::Qsv => "QSV",
+            Engine::Vaapi => "VAAPI",
+        }
+    }
+
+    pub fn vendor(self) -> &'static str {
+        match self {
+            Engine::Nvenc => "NVIDIA",
+            Engine::Qsv | Engine::Vaapi => "Intel",
+        }
+    }
+
+    pub fn is_intel(self) -> bool {
+        self != Engine::Nvenc
+    }
+
+    /// Nazwa enkodera w ffmpeg.
+    pub fn encoder(self, c: Codec) -> &'static str {
+        match (self, c) {
+            (Engine::Nvenc, Codec::Hevc) => "hevc_nvenc",
+            (Engine::Nvenc, Codec::Av1) => "av1_nvenc",
+            (Engine::Qsv, Codec::Hevc) => "hevc_qsv",
+            (Engine::Qsv, Codec::Av1) => "av1_qsv",
+            (Engine::Vaapi, Codec::Hevc) => "hevc_vaapi",
+            (Engine::Vaapi, Codec::Av1) => "av1_vaapi",
+        }
+    }
+
+    pub fn from_name(s: &str) -> Option<Engine> {
+        match s.to_ascii_lowercase().as_str() {
+            "nvenc" | "nvidia" => Some(Engine::Nvenc),
+            "qsv" => Some(Engine::Qsv),
+            "vaapi" => Some(Engine::Vaapi),
+            _ => None,
+        }
+    }
+
+    /// Znacznik w nazwach plików — NVENC bez znacznika (zgodność ze starszymi wynikami).
+    fn file_tag(self) -> &'static str {
+        match self {
+            Engine::Nvenc => "",
+            Engine::Qsv => "_qsv",
+            Engine::Vaapi => "_vaapi",
+        }
+    }
 }
 
 /// Kontener pliku wynikowego: dla wejścia .mp4/.MP4 wynik też jest .mp4, w pozostałych przypadkach .mkv.
@@ -41,7 +110,8 @@ impl Container {
     }
 }
 
-/// Domyślne wartości jakości (NVENC -cq, mniej = lepsza jakość i większy plik).
+/// Domyślne wartości jakości (mniej = lepsza jakość i większy plik). Ta sama liczba trafia do
+/// NVENC (-cq), QSV (ICQ -global_quality) i VAAPI (CQP -qp; AV1 w skali 0–255, przeliczane ×5).
 /// Uwaga: w skrypcie fish nazwy AV1 mówiły "cq23", ale faktyczny parametr to 25.
 pub const DEFAULT_HEVC_CQ: u8 = 19;
 pub const DEFAULT_AV1_CQ: u8 = 25;
@@ -52,13 +122,18 @@ pub const AV1_TAG: &str = "av1_10bit_cq23";
 
 pub const DENOISE_CUDA_FILTER: &str = "bilateral_cuda=window_size=5:sigmaS=1.5:sigmaR=12.0";
 pub const DENOISE_CPU_FILTER: &str = "hqdn3d=1.2:1.0:2.0:1.5";
+/// Łagodne odszumianie na karcie Intel (vpp_qsv: 0–100, denoise_vaapi: 0–64).
+pub const DENOISE_QSV_LEVEL: u32 = 16;
+pub const DENOISE_VAAPI_LEVEL: u32 = 10;
 
 #[derive(Clone)]
 pub struct Opts {
     pub codec: Codec,
-    /// Jakość HEVC NVENC (-cq)
+    /// Silnik kodujący (NVENC / QSV / VAAPI)
+    pub engine: Engine,
+    /// Jakość HEVC (CQ)
     pub hevc_cq: u8,
-    /// Jakość AV1 NVENC (-cq)
+    /// Jakość AV1 (CQ)
     pub av1_cq: u8,
     pub pl_eac3: bool,
     /// -da: dodatkowo audio EN (E-AC-3 5.1) oraz napisy EN i PL
@@ -79,6 +154,8 @@ pub struct Opts {
 pub enum Denoise {
     Off,
     Cuda,
+    /// Filtr sprzętowy karty Intel (vpp_qsv denoise / denoise_vaapi)
+    Intel,
     Cpu,
 }
 
@@ -87,6 +164,10 @@ pub struct Runtime {
     pub av1_tune: String,
     pub denoise: Denoise,
     pub progress_dir: PathBuf,
+    /// Węzeł renderD karty Intel (QSV/VAAPI).
+    pub intel_dev: Option<PathBuf>,
+    /// Dekodery QSV dostępne w ffmpeg (np. "hevc_qsv").
+    pub qsv_decoders: Vec<String>,
 }
 
 pub struct Paths {
@@ -104,6 +185,11 @@ pub struct Paths {
 }
 
 impl Opts {
+    /// Np. "HEVC NVENC", "AV1 QSV".
+    pub fn codec_label(&self) -> String {
+        format!("{} {}", self.codec.label(), self.engine.label())
+    }
+
     /// CQ dla aktualnie wybranego kodeka.
     pub fn cq(&self) -> u8 {
         match self.codec {
@@ -133,7 +219,7 @@ impl Opts {
     }
 
     fn paths(&self, stem: &str, container: Container) -> Paths {
-        let cqt = self.cq_tag();
+        let cqt = format!("{}{}", self.engine.file_tag(), self.cq_tag());
         let d = &self.output_dir;
         let mut suffix = match self.codec {
             Codec::Hevc => format!("_hevc{cqt}"),
