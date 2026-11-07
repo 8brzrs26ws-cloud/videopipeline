@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag wydania do utworzenia (np. v0.11.1). Puste = tylko artefakty do pobrania.'
+        description: 'Tag wydania do utworzenia (np. v0.12.0). Puste = tylko artefakty do pobrania.'
         required: false
         default: ''
 
