@@ -39,6 +39,61 @@ pub enum Mode {
     Finished,
     ConfirmAbort,
     ConfirmQuit,
+    /// F6: potwierdzenie usunięcia plików z dysku
+    ConfirmDelete,
+    /// F4: zmiana nazwy
+    Rename,
+}
+
+/// Pole tekstowe z kursorem (zmiana nazwy).
+pub struct TextInput {
+    pub chars: Vec<char>,
+    pub cursor: usize,
+}
+
+impl TextInput {
+    /// Kursor przed rozszerzeniem — najczęściej dopisuje się coś do nazwy (np. "_v2").
+    pub fn for_filename(name: &str) -> Self {
+        let chars: Vec<char> = name.chars().collect();
+        let cursor = match name.rfind('.') {
+            Some(i) if i > 0 => name[..i].chars().count(),
+            _ => chars.len(),
+        };
+        TextInput { chars, cursor }
+    }
+
+    pub fn text(&self) -> String {
+        self.chars.iter().collect()
+    }
+
+    /// true = klawisz obsłużony (edycja albo ruch kursora).
+    fn key(&mut self, code: KeyCode) -> bool {
+        match code {
+            KeyCode::Char(c) => {
+                self.chars.insert(self.cursor, c);
+                self.cursor += 1;
+            }
+            KeyCode::Backspace if self.cursor > 0 => {
+                self.cursor -= 1;
+                self.chars.remove(self.cursor);
+            }
+            KeyCode::Delete if self.cursor < self.chars.len() => {
+                self.chars.remove(self.cursor);
+            }
+            KeyCode::Left => self.cursor = self.cursor.saturating_sub(1),
+            KeyCode::Right => self.cursor = (self.cursor + 1).min(self.chars.len()),
+            KeyCode::Home => self.cursor = 0,
+            KeyCode::End => self.cursor = self.chars.len(),
+            KeyCode::Backspace | KeyCode::Delete => {}
+            _ => return false,
+        }
+        true
+    }
+}
+
+pub struct RenameCtx {
+    pub from: PathBuf,
+    pub input: TextInput,
 }
 
 pub const OPTION_COUNT: usize = 13;
@@ -74,6 +129,10 @@ pub struct App {
     /// Obciążenie GPU/CPU/VRAM — monitor działa tylko podczas kodowania.
     pub sys: SysStats,
     pub monitor: Option<Monitor>,
+    /// F6: pliki czekające na potwierdzenie usunięcia
+    pub pending_delete: Vec<PathBuf>,
+    /// F4: trwająca zmiana nazwy
+    pub rename: Option<RenameCtx>,
 }
 
 impl App {
@@ -95,6 +154,8 @@ impl App {
             do_shutdown: false,
             sys: SysStats::default(),
             monitor: None,
+            pending_delete: vec![],
+            rename: None,
         };
         if !initial.is_empty() {
             app.add_paths(initial);
@@ -290,6 +351,8 @@ impl App {
             }
             Mode::ConfirmAbort => self.key_confirm(k, false),
             Mode::ConfirmQuit => self.key_confirm(k, true),
+            Mode::ConfirmDelete => self.key_confirm_delete(k),
+            Mode::Rename => self.key_rename(k),
             Mode::Finished => {
                 if self.shutdown_at.is_some() {
                     self.shutdown_at = None;
@@ -356,7 +419,9 @@ impl App {
             },
             KeyCode::Char(c @ ('+' | '-' | '*')) => self.marks(c),
             KeyCode::F(1) => self.mode = Mode::Help,
+            KeyCode::F(4) => self.begin_rename(),
             KeyCode::F(5) => self.add_from_left(),
+            KeyCode::F(6) => self.begin_delete(),
             KeyCode::F(7) => self.mode = Mode::Options,
             KeyCode::F(8) | KeyCode::Delete => {
                 let n = self.queue.remove_marked_or_current();
@@ -365,6 +430,125 @@ impl App {
             KeyCode::F(9) => self.start_run(),
             KeyCode::F(10) => self.request_quit(),
             _ => {}
+        }
+    }
+
+    // --------------------------------------------------------- operacje na plikach ---
+
+    /// F6: usuń zaznaczone (lub bieżący) pliki z dysku — tylko lewy panel, tylko pliki.
+    fn begin_delete(&mut self) {
+        if self.focus != Focus::Left {
+            self.status_msg = "F6 usuwa pliki z dysku w lewym panelu (z kolejki usuwa F8)".into();
+            return;
+        }
+        let targets = self.browser.targets();
+        let files: Vec<PathBuf> = targets.iter().filter(|p| p.is_file()).cloned().collect();
+        if files.is_empty() {
+            self.status_msg = if targets.is_empty() {
+                "Nic nie wybrano".into()
+            } else {
+                "Katalogi nie są usuwane — zaznacz pliki".into()
+            };
+            return;
+        }
+        self.pending_delete = files;
+        self.mode = Mode::ConfirmDelete;
+    }
+
+    fn key_confirm_delete(&mut self, k: KeyEvent) {
+        match k.code {
+            KeyCode::Char('y' | 'Y' | 't' | 'T') | KeyCode::Enter => {
+                let files = std::mem::take(&mut self.pending_delete);
+                let mut removed: Vec<PathBuf> = vec![];
+                let mut errors: Vec<String> = vec![];
+                for f in &files {
+                    match std::fs::remove_file(f) {
+                        Ok(()) => removed.push(f.clone()),
+                        Err(e) => errors.push(format!(
+                            "{}: {e}",
+                            f.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()
+                        )),
+                    }
+                }
+                self.queue.remove_paths(&removed);
+                for p in &removed {
+                    self.browser.marked.remove(p);
+                }
+                self.browser.reload(None);
+                self.status_msg = match errors.first() {
+                    None => format!("Usunięto z dysku: {}", removed.len()),
+                    Some(e) => format!("Usunięto: {}, błędy: {} ({e})", removed.len(), errors.len()),
+                };
+                self.mode = Mode::Normal;
+            }
+            KeyCode::Char('n' | 'N') | KeyCode::Esc => {
+                self.pending_delete.clear();
+                self.mode = Mode::Normal;
+            }
+            _ => {}
+        }
+    }
+
+    /// F4: zmiana nazwy bieżącego pliku lub katalogu w lewym panelu.
+    fn begin_rename(&mut self) {
+        if self.focus != Focus::Left {
+            self.status_msg = "F4 zmienia nazwę w lewym panelu".into();
+            return;
+        }
+        let Some(e) = self.browser.selected().filter(|e| !e.is_up) else {
+            self.status_msg = "Nic nie wybrano".into();
+            return;
+        };
+        self.rename = Some(RenameCtx { from: e.path.clone(), input: TextInput::for_filename(&e.name) });
+        self.mode = Mode::Rename;
+    }
+
+    fn key_rename(&mut self, k: KeyEvent) {
+        let Some(ctx) = self.rename.as_mut() else {
+            self.mode = Mode::Normal;
+            return;
+        };
+        match k.code {
+            KeyCode::Esc => {
+                self.rename = None;
+                self.mode = Mode::Normal;
+            }
+            KeyCode::Enter => {
+                let name = ctx.input.text().trim().to_string();
+                let from = ctx.from.clone();
+                let old_name = from.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                if name.is_empty() || name == "." || name == ".." || name.contains('/') {
+                    self.status_msg = "Niepoprawna nazwa (pusta, \".\", \"..\" albo z \"/\")".into();
+                    return;
+                }
+                if name == old_name {
+                    self.rename = None;
+                    self.mode = Mode::Normal;
+                    return;
+                }
+                let to = from.with_file_name(&name);
+                if to.exists() {
+                    self.status_msg = format!("{name} już istnieje — podaj inną nazwę");
+                    return;
+                }
+                match std::fs::rename(&from, &to) {
+                    Ok(()) => {
+                        self.queue.rename_path(&from, &to);
+                        if self.browser.marked.remove(&from) {
+                            self.browser.marked.insert(to.clone());
+                        }
+                        // Plik, który przestał wyglądać na film (inne rozszerzenie), zniknie z panelu.
+                        self.browser.reload(Some(&name));
+                        self.status_msg = format!("{old_name} → {name}");
+                    }
+                    Err(e) => self.status_msg = format!("Nie udało się zmienić nazwy: {e}"),
+                }
+                self.rename = None;
+                self.mode = Mode::Normal;
+            }
+            code => {
+                ctx.input.key(code);
+            }
         }
     }
 

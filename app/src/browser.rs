@@ -114,6 +114,14 @@ impl Browser {
         self.state.selected().and_then(|i| self.entries.get(i))
     }
 
+    /// Cel operacji na plikach: zaznaczone pozycje albo bieżąca (bez "..").
+    pub fn targets(&self) -> Vec<PathBuf> {
+        if !self.marked.is_empty() {
+            return self.marked.iter().cloned().collect();
+        }
+        self.selected().filter(|e| !e.is_up).map(|e| vec![e.path.clone()]).unwrap_or_default()
+    }
+
     pub fn move_by(&mut self, d: isize) {
         let len = self.entries.len();
         if len == 0 {
@@ -325,6 +333,23 @@ impl Queue {
 
     pub fn total_size(&self) -> u64 {
         self.items.iter().map(|q| q.size).sum()
+    }
+
+    /// Usuwa z kolejki podane ścieżki (np. pliki skasowane z dysku).
+    pub fn remove_paths(&mut self, paths: &[PathBuf]) {
+        self.items.retain(|q| !paths.contains(&q.path));
+        self.marked.retain(|p| !paths.contains(p));
+        self.clamp_selection();
+    }
+
+    /// Plik w kolejce zmienił nazwę na dysku.
+    pub fn rename_path(&mut self, old: &std::path::Path, new: &std::path::Path) {
+        for q in self.items.iter_mut().filter(|q| q.path == old) {
+            q.path = new.to_path_buf();
+        }
+        if self.marked.remove(old) {
+            self.marked.insert(new.to_path_buf());
+        }
     }
 
     pub fn retain_by_name(&mut self, keep: impl Fn(&str) -> bool) {

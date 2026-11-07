@@ -175,6 +175,12 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             render_run(f, area, app);
             render_confirm(f, area, "Kodowanie trwa. Przerwać i wyjść?");
         }
+        Mode::ConfirmDelete => render_delete(f, area, &app.pending_delete),
+        Mode::Rename => {
+            if let Some(r) = &app.rename {
+                render_rename(f, area, r);
+            }
+        }
     }
 }
 
@@ -345,7 +351,7 @@ fn render_status(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_fkeys(f: &mut Frame, area: Rect) {
-    let labels = ["Pomoc", "", "", "", "Dodaj", "", "Opcje", "Usuń", "Koduj", "Wyjście"];
+    let labels = ["Pomoc", "", "", "Nazwa", "Dodaj", "Kasuj", "Opcje", "Z kolejki", "Koduj", "Wyjście"];
     let total = area.width as usize;
     let cell = total / 10;
     let mut spans: Vec<Span<'static>> = vec![];
@@ -433,7 +439,7 @@ fn render_options(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_help(f: &mut Frame, area: Rect) {
-    let rect = centered(area, 68, 22);
+    let rect = centered(area, 68, 24);
     f.render_widget(Clear, rect);
     let block = dialog_block("Pomoc", BOX_ALL);
     let inner = block.inner(rect);
@@ -453,7 +459,9 @@ fn render_help(f: &mut Frame, area: Rect) {
         k("+  -  *", "zaznacz wszystko / wyczyść / odwróć"),
         k("Enter", "katalog: wejdź · plik: dodaj do kolejki"),
         k("Backspace", "katalog wyżej"),
+        k("F4", "zmień nazwę pliku/katalogu (lewy panel)"),
         k("F5", "dodaj zaznaczone (lub bieżący) do kolejki"),
+        k("F6", "usuń zaznaczone pliki z dysku (lewy panel)"),
         k("F7", "opcje: kodek i karta (NVENC/QSV/VAAPI), audio, analizy…"),
         k("F8 / Del", "usuń zaznaczone (lub bieżący) z kolejki"),
         k("F9", "uruchom kodowanie"),
@@ -461,6 +469,66 @@ fn render_help(f: &mut Frame, area: Rect) {
         Line::default(),
         Line::from(Span::styled(" Katalog jako cel F5 dodaje wszystkie filmy z niego.", fg(DIM))),
         Line::from(Span::styled(" Dowolny klawisz zamyka pomoc.", fg(DIM))),
+    ];
+    f.render_widget(Paragraph::new(lines), inner);
+}
+
+/// F6: potwierdzenie usunięcia plików z dysku (lista do 5 nazw).
+fn render_delete(f: &mut Frame, area: Rect, files: &[std::path::PathBuf]) {
+    let shown = files.len().min(5);
+    let h = 7 + shown as u16 + u16::from(files.len() > shown);
+    let rect = centered(area, 64, h);
+    f.render_widget(Clear, rect);
+    let block = dialog_block("Usuń z dysku", BOX_ERR);
+    let inner = block.inner(rect);
+    f.render_widget(block, rect);
+    let w = inner.width as usize;
+    let mut lines = vec![
+        Line::default(),
+        Line::from(Span::styled(format!("Usunąć z dysku plików: {}?", files.len()), bold(TITLE))),
+        Line::from(Span::styled("Tej operacji nie można cofnąć.", fg(G_HIGH))),
+        Line::default(),
+    ];
+    for p in files.iter().take(shown) {
+        let n = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        lines.push(Line::from(Span::styled(trunc(&n, w.saturating_sub(2)), fg(TEXT))));
+    }
+    if files.len() > shown {
+        lines.push(Line::from(Span::styled(format!("… i {} więcej", files.len() - shown), fg(DIM))));
+    }
+    lines.push(Line::from(Span::styled("[T]ak / [N]ie", fg(G_MID))));
+    f.render_widget(Paragraph::new(lines).alignment(Alignment::Center), inner);
+}
+
+/// F4: pole z nową nazwą; kursor jako odwrócony znak.
+fn render_rename(f: &mut Frame, area: Rect, r: &crate::app::RenameCtx) {
+    let rect = centered(area, 72, 7);
+    f.render_widget(Clear, rect);
+    let block = dialog_block("Zmień nazwę", BOX_QUEUE);
+    let inner = block.inner(rect);
+    f.render_widget(block, rect);
+    let w = (inner.width as usize).saturating_sub(2).max(10);
+
+    // Okno przewijane tak, żeby kursor był widoczny.
+    let chars = &r.input.chars;
+    let start = r.input.cursor.saturating_sub(w.saturating_sub(1));
+    let mut spans = vec![Span::raw(" ")];
+    for i in start..(start + w).min(chars.len() + 1) {
+        let c = chars.get(i).copied().unwrap_or(' ');
+        let style = if i == r.input.cursor {
+            Style::default().bg(col(TEXT)).fg(col(DLG_BG))
+        } else {
+            Style::default().bg(col(CURSOR_INACTIVE)).fg(col(TEXT))
+        };
+        spans.push(Span::styled(c.to_string(), style));
+    }
+    let old = r.from.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let lines = vec![
+        Line::from(Span::styled(format!(" Obecnie: {}", trunc(&old, w.saturating_sub(10))), fg(DIM))),
+        Line::default(),
+        Line::from(spans),
+        Line::default(),
+        Line::from(Span::styled(" Enter — zapisz · Esc — anuluj · ←→ Home End — kursor", fg(G_MID))),
     ];
     f.render_widget(Paragraph::new(lines), inner);
 }

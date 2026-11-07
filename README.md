@@ -59,9 +59,11 @@ po lewej pliki, po prawej kolejkę kodowania.
 | Spacja, Ins | zaznacz / odznacz |
 | Shift+↑↓ / PgUp / PgDn / Home / End | zaznaczanie wielu pozycji |
 | `+` `-` `*` | zaznacz wszystko / wyczyść / odwróć |
+| F4 | zmień nazwę pliku lub katalogu w lewym panelu (kursor stoi przed rozszerzeniem — wygodne dopisanie np. `_v2`) |
 | F5 | dodaj zaznaczone do kolejki (katalog = wszystkie filmy w nim) |
+| F6 | usuń zaznaczone (lub bieżący) pliki z dysku w lewym panelu — po potwierdzeniu; katalogi nie są usuwane |
 | F7 | opcje |
-| F8 / Del | usuń z kolejki |
+| F8 / Del | wyjmij z kolejki (plik zostaje na dysku) |
 | F9 | koduj (Esc przerywa) |
 | F10, Ctrl+C | wyjście |
 
