@@ -24,6 +24,8 @@ if ! "$ENGINE" info >/dev/null 2>&1; then
 fi
 
 mkdir -p build dist
+# dist/ zawiera tylko wynik bieżącego budowania (starsze wersje są na GitHub Releases).
+rm -f dist/*.AppImage dist/*.deb dist/*.sha256
 "$ENGINE" build -t "$IMAGE" docker
 
 # Domyślnie najnowszy stabilny ffmpeg (nadpisz np. FFMPEG_VERSION=7.1.1 dla powtarzalnego wydania).

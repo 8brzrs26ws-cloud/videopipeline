@@ -1,15 +1,24 @@
 #!/usr/bin/env bash
-# Wysyła zawartość dist/ jako wydanie na GitHubie:  ./release.sh v0.12.0
+# Wysyła pliki BIEŻĄCEJ wersji z dist/ jako wydanie na GitHubie:  ./release.sh v0.12.0
+# Bierze tylko pliki z numerem wersji z tagu (starsze buildy leżące w dist/ są pomijane),
+# a tag musi zgadzać się z wersją w app/Cargo.toml.
 # Wymaga zalogowanego `gh` (gh auth login). Istniejące wydanie dostaje pliki podmienione (--clobber).
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 TAG="${1:?podaj tag, np. ./release.sh v0.12.0}"
+VER="${TAG#v}"
+CARGO_VER="$(grep -m1 '^version' app/Cargo.toml | cut -d'"' -f2)"
+[[ "$VER" = "$CARGO_VER" ]] || { echo "BŁĄD: tag $TAG nie zgadza się z wersją w app/Cargo.toml ($CARGO_VER)" >&2; exit 1; }
+
 shopt -s nullglob
-FILES=(dist/*.AppImage dist/*.deb dist/*.sha256)
-[[ ${#FILES[@]} -gt 0 ]] || { echo "BŁĄD: dist/ jest pusty — najpierw ./build-local.sh" >&2; exit 1; }
+FILES=(dist/VideoPipeline-"$VER"-*.AppImage dist/VideoPipeline-"$VER"-*.AppImage.sha256
+       dist/videopipeline_"$VER"_*.deb dist/videopipeline_"$VER"_*.deb.sha256)
+[[ ${#FILES[@]} -gt 0 ]] || { echo "BŁĄD: brak plików wersji $VER w dist/ — najpierw ./build-local.sh" >&2; exit 1; }
+printf 'Wysyłam:\n'; printf '  %s\n' "${FILES[@]}"
+
 if gh release view "$TAG" >/dev/null 2>&1; then
     gh release upload "$TAG" "${FILES[@]}" --clobber
 else
-    gh release create "$TAG" "${FILES[@]}" --title "VideoPipeline ${TAG#v}" --generate-notes
+    gh release create "$TAG" "${FILES[@]}" --title "VideoPipeline $VER" --generate-notes
 fi
 echo "Gotowe: $(gh release view "$TAG" --json url -q .url)"
