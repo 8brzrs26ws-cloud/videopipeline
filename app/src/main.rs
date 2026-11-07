@@ -174,11 +174,38 @@ fn real_main() -> Result<i32> {
     let script = !cli.tui && (!cli.paths.is_empty() || cli.batch);
 
     if cli.detect {
-        let hw = hw::detect();
-        println!("Wykryte enkodery: {}", hw.summary());
+        // Diagnostyka: wersja ffmpeg, każdy test z poleceniem i błędem ffmpeg.
+        match hw::ffmpeg_version() {
+            Some(v) => println!("{v}"),
+            None => println!("ffmpeg: nie znaleziono albo nie uruchamia się"),
+        }
+        let (hw, reports, qsv_tries) = hw::detect_report();
+        for (dev, ok, cmd, err) in &qsv_tries {
+            println!("\n[{}] urządzenie QSV: {dev}", if *ok { "OK  " } else { "BRAK" });
+            if !ok {
+                println!("  polecenie: {cmd}");
+                for l in err.lines().filter(|l| !l.trim().is_empty()).take(8) {
+                    println!("  {l}");
+                }
+            }
+        }
+        for r in &reports {
+            let mark = if r.ok { "OK  " } else { "BRAK" };
+            println!("\n[{mark}] {} {}", r.codec.label(), r.engine.label());
+            if !r.ok {
+                if !r.command.is_empty() {
+                    println!("  polecenie: {}", r.command);
+                }
+                for l in r.error.lines().filter(|l| !l.trim().is_empty()).take(8) {
+                    println!("  {l}");
+                }
+            }
+        }
+        println!("\nWykryte enkodery: {}", hw.summary());
         if let Some(d) = &hw.intel_dev {
             println!("Karta Intel: {}", d.display());
         }
+        term::wait_for_enter_if_relaunched();
         return Ok(0);
     }
 
