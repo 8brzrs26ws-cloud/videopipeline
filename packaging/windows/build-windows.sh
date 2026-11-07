@@ -202,15 +202,23 @@ if [[ "$FORCE" = 1 || ! -f "$FFPREFIX/bin/ffmpeg.exe" || "$(cat "$FFPREFIX/.stam
         make -j"$JOBS"
         make install
         # ffmpeg.exe nie uruchomi się w kontenerze — sprawdzamy, co trafiło do konfiguracji.
+        # Od FFmpeg 5.1 lista komponentów (CONFIG_*_ENCODER itd.) jest w config_components.h.
         cp config.h "$FFPREFIX/config.h"
+        [[ -f config_components.h ]] && cp config_components.h "$FFPREFIX/config_components.h"
     )
     echo "$FFSTAMP" > "$FFPREFIX/.stamp"
 fi
+# ffmpeg zbudowany wcześniej (cache) mógł nie mieć skopiowanego config_components.h — weź go ze źródeł.
+SRC="$WORK/ffmpeg-$FFMPEG_VERSION"
+if [[ ! -f "$FFPREFIX/config_components.h" && -f "$SRC/config_components.h" ]]; then
+    cp "$SRC/config_components.h" "$FFPREFIX/config_components.h"
+fi
+FFCONF="$(cat "$FFPREFIX/config.h" "$FFPREFIX/config_components.h" 2>/dev/null || true)"
 for c in HEVC_NVENC_ENCODER AV1_NVENC_ENCODER HEVC_QSV_ENCODER AV1_QSV_ENCODER EAC3_ENCODER \
          H264_QSV_DECODER HEVC_QSV_DECODER AV1_QSV_DECODER LIBDAV1D_DECODER \
          HWUPLOAD_CUDA_FILTER HWDOWNLOAD_FILTER BILATERAL_CUDA_FILTER HQDN3D_FILTER CROPDETECT_FILTER \
          VPP_QSV_FILTER HWUPLOAD_FILTER MATROSKA_MUXER MP4_MUXER; do
-    grep -q "^#define CONFIG_$c 1" "$FFPREFIX/config.h" || fail "ffmpeg (Windows) bez $c"
+    grep -q "^#define CONFIG_$c 1" <<<"$FFCONF" || fail "ffmpeg (Windows) bez $c"
 done
 echo "ffmpeg.exe: NVENC, QSV, CUDA i filtry obecne"
 
