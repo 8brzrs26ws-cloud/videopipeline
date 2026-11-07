@@ -64,7 +64,7 @@ VP_RUSTFLAGS_EXTRA="-C target-cpu=$TARGET_CPU" bash ./build.sh
 # --------------------------------------------------------------------------- 2. dovi_tool, hdr10plus_tool
 log "2/5 dovi_tool $DOVI_TOOL_REF (wbudowana czcionka, bez fontconfig) + hdr10plus_tool $HDR10PLUS_TOOL_REF (cargo install --git, $TARGET_CPU)"
 TOOLS="$CACHE/tools"
-STAMP="dovi_tool=$DOVI_TOOL_REF+internal-font hdr10plus_tool=$HDR10PLUS_TOOL_REF cpu=$TARGET_CPU"
+STAMP="dovi_tool=$DOVI_TOOL_REF+internal-font hdr10plus_tool=$HDR10PLUS_TOOL_REF+internal-font cpu=$TARGET_CPU"
 if [[ "$FORCE" = 1 || ! -x "$TOOLS/bin/dovi_tool" || ! -x "$TOOLS/bin/hdr10plus_tool" \
       || "$(cat "$TOOLS/.stamp" 2>/dev/null)" != "$STAMP" ]]; then
     export RUSTFLAGS="-C target-cpu=$TARGET_CPU"
@@ -73,7 +73,8 @@ if [[ "$FORCE" = 1 || ! -x "$TOOLS/bin/dovi_tool" || ! -x "$TOOLS/bin/hdr10plus_
         --git https://github.com/quietvoid/dovi_tool --tag "$DOVI_TOOL_REF" \
         --no-default-features --features internal-font dovi_tool
     cargo install --locked --force --root "$TOOLS" \
-        --git https://github.com/quietvoid/hdr10plus_tool --tag "$HDR10PLUS_TOOL_REF" hdr10plus_tool
+        --git https://github.com/quietvoid/hdr10plus_tool --tag "$HDR10PLUS_TOOL_REF" \
+        --no-default-features --features internal-font hdr10plus_tool
     unset RUSTFLAGS CARGO_TARGET_DIR
     echo "$STAMP" > "$TOOLS/.stamp"
 fi

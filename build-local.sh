@@ -4,7 +4,7 @@
 #   dist/videopipeline_<wersja>_amd64.deb
 # Cache (ffmpeg, dovi_tool, hdr10plus_tool, crate'y) zostaje w ./build, więc kolejne budowania są szybkie.
 #
-# Zmienne (przekazywane do kontenera): FFMPEG_VERSION, DOVI_TOOL_REF, HDR10PLUS_TOOL_REF, NVCODEC_HEADERS_REF
+# Zmienne (przekazywane do kontenera): FFMPEG_VERSION (domyślnie latest), DOVI_TOOL_REF, HDR10PLUS_TOOL_REF, NVCODEC_HEADERS_REF
 #   — wartość "latest" bierze najnowsze wydanie; INTEL=auto|1|0 (VAAPI/QSV w ffmpeg); TARGET_CPU; FORCE=1.
 # Silnik: docker lub podman (DOCKER=podman).
 set -euo pipefail
@@ -25,6 +25,9 @@ fi
 
 mkdir -p build dist
 "$ENGINE" build -t "$IMAGE" docker
+
+# Domyślnie najnowszy stabilny ffmpeg (nadpisz np. FFMPEG_VERSION=7.1.1 dla powtarzalnego wydania).
+export FFMPEG_VERSION="${FFMPEG_VERSION:-latest}"
 
 PASS=()
 for v in FFMPEG_VERSION DOVI_TOOL_REF HDR10PLUS_TOOL_REF NVCODEC_HEADERS_REF INTEL TARGET_CPU FORCE JOBS VERSION; do

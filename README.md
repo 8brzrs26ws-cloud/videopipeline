@@ -79,8 +79,8 @@ Wydania budujemy w kontenerze Debian 13 (glibc 2.41), więc wynik nie zależy od
     ./build-local.sh                  # dist/: AppImage, deb, sumy .sha256 (cache w ./build — kolejne budowania są szybkie)
     ./release.sh v0.11.1              # wysyła dist/ na GitHub (gh auth login); tworzy tag, jeśli go nie ma
 
-Zmienne środowiskowe: `FFMPEG_VERSION`, `DOVI_TOOL_REF`, `HDR10PLUS_TOOL_REF` (wartość `latest` = najnowsze wydanie; domyślnie
-przypięte: ffmpeg 7.1.1, dovi_tool 2.3.4, hdr10plus_tool 1.7.2), `NVCODEC_HEADERS_REF` (domyślnie master),
+Zmienne środowiskowe: `FFMPEG_VERSION`, `DOVI_TOOL_REF`, `HDR10PLUS_TOOL_REF` (wartość `latest` = najnowsze wydanie; `./build-local.sh` domyślnie
+bierze najnowszy ffmpeg, a narzędzia ma przypięte: dovi_tool 2.3.4, hdr10plus_tool 1.7.2), `NVCODEC_HEADERS_REF` (domyślnie master),
 `INTEL=auto|1|0` (ffmpeg z VAAPI i QSV/libvpl dla przyszłego kodowania na Intelu; `auto` — jeśli są statyczne libva/libvpl),
 `TARGET_CPU` (domyślnie x86-64-v3), `FORCE=1` (przebuduj składniki), `DOCKER=podman`.
 Workflow `.github/workflows/release.yml` robi to samo na GitHubie (ręcznie: *Actions → Run workflow*, lub po tagu `v*`).
