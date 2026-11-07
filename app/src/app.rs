@@ -41,10 +41,11 @@ pub enum Mode {
     ConfirmQuit,
 }
 
-pub const OPTION_COUNT: usize = 12;
+pub const OPTION_COUNT: usize = 13;
 /// Indeksy wierszy w oknie opcji (F7).
 pub const OPT_HEVC_CQ: usize = 1;
 pub const OPT_AV1_CQ: usize = 2;
+pub const OPT_QSV_PRESET: usize = 3;
 
 pub struct RunCtx {
     pub status: SharedStatus,
@@ -430,6 +431,7 @@ impl App {
         match self.opt_cursor {
             OPT_HEVC_CQ => self.opts.hevc_cq = bump(self.opts.hevc_cq),
             OPT_AV1_CQ => self.opts.av1_cq = bump(self.opts.av1_cq),
+            OPT_QSV_PRESET => self.cycle_preset(d.signum()),
             0 => self.cycle_codec(if d < 0 { -1 } else { 1 }),
             _ => self.toggle_option(),
         }
@@ -456,19 +458,31 @@ impl App {
         self.opts.codec = c;
     }
 
+    /// Preset QSV: ← szybciej, → wolniej i lepiej (bez zawijania).
+    fn cycle_preset(&mut self, d: i32) {
+        let i = QSV_PRESETS.iter().position(|p| *p == self.opts.qsv_preset).unwrap_or(4) as i32;
+        let n = (i + d).clamp(0, QSV_PRESETS.len() as i32 - 1);
+        self.opts.qsv_preset = QSV_PRESETS[n as usize];
+    }
+
     fn toggle_option(&mut self) {
         match self.opt_cursor {
             0 => self.cycle_codec(1),
             // 1, 2: wiersze CQ — zmieniane strzałkami (Enter/Spacja nic nie robią)
-            3 => self.opts.pl_eac3 = !self.opts.pl_eac3,
-            4 => self.opts.extra = !self.opts.extra,
-            5 => self.opts.denoise = !self.opts.denoise,
-            6 => self.opts.no_crop = !self.opts.no_crop,
-            7 => self.opts.no_dv = !self.opts.no_dv,
-            8 => self.opts.no_hdr10plus = !self.opts.no_hdr10plus,
-            9 => self.opts.copy = !self.opts.copy,
-            10 => self.opts.shutdown = !self.opts.shutdown,
-            11 => self.opt_edit = Some(self.opts.output_dir.to_string_lossy().to_string()),
+            // 3: preset QSV — Enter/Spacja przechodzą do następnego (wolniejszego), na końcu wraca na początek
+            OPT_QSV_PRESET => {
+                let i = QSV_PRESETS.iter().position(|p| *p == self.opts.qsv_preset).unwrap_or(4);
+                self.opts.qsv_preset = QSV_PRESETS[(i + 1) % QSV_PRESETS.len()];
+            }
+            4 => self.opts.pl_eac3 = !self.opts.pl_eac3,
+            5 => self.opts.extra = !self.opts.extra,
+            6 => self.opts.denoise = !self.opts.denoise,
+            7 => self.opts.no_crop = !self.opts.no_crop,
+            8 => self.opts.no_dv = !self.opts.no_dv,
+            9 => self.opts.no_hdr10plus = !self.opts.no_hdr10plus,
+            10 => self.opts.copy = !self.opts.copy,
+            11 => self.opts.shutdown = !self.opts.shutdown,
+            12 => self.opt_edit = Some(self.opts.output_dir.to_string_lossy().to_string()),
             _ => {}
         }
     }

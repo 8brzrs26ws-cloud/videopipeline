@@ -93,7 +93,7 @@ fn preflight_intel(opts: &Opts, rt: &mut Runtime) -> Result<()> {
     }
     let cq = opts.cq();
     let quality = match (opts.engine, opts.codec) {
-        (Engine::Qsv, _) => format!("ICQ global_quality {cq}, preset veryslow"),
+        (Engine::Qsv, _) => format!("ICQ global_quality {cq}, preset {}", opts.qsv_preset),
         (_, Codec::Av1) => format!("CQP qp {} (CQ {cq} × 5, skala AV1 0–255)", (cq as u32 * 5).min(255)),
         _ => format!("CQP qp {cq}"),
     };

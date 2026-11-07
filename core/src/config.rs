@@ -120,6 +120,11 @@ pub const CQ_MIN: u8 = 1;
 pub const CQ_MAX: u8 = 51;
 pub const AV1_TAG: &str = "av1_10bit_cq23";
 
+/// Presety enkodera Intel QSV (od najszybszego do najwolniejszego, najlepszego).
+/// Na zintegrowanej grafice veryslow bywa kilka razy wolniejszy od slow przy niewielkim zysku jakości.
+pub const QSV_PRESETS: [&str; 7] = ["veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"];
+pub const DEFAULT_QSV_PRESET: &str = "slow";
+
 pub const DENOISE_CUDA_FILTER: &str = "bilateral_cuda=window_size=5:sigmaS=1.5:sigmaR=12.0";
 pub const DENOISE_CPU_FILTER: &str = "hqdn3d=1.2:1.0:2.0:1.5";
 /// Łagodne odszumianie na karcie Intel (vpp_qsv: 0–100, denoise_vaapi: 0–64).
@@ -135,6 +140,8 @@ pub struct Opts {
     pub hevc_cq: u8,
     /// Jakość AV1 (CQ)
     pub av1_cq: u8,
+    /// Preset QSV (jeden z QSV_PRESETS); NVENC ma stały p7, VAAPI nie ma presetów.
+    pub qsv_preset: &'static str,
     pub pl_eac3: bool,
     /// -da: dodatkowo audio EN (E-AC-3 5.1) oraz napisy EN i PL
     pub extra: bool,

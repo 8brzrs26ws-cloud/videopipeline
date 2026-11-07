@@ -202,11 +202,11 @@ fn build_args_intel(
 
             enc = match opts.codec {
                 Codec::Hevc => sv(&[
-                    "-c:v", "hevc_qsv", "-preset", "veryslow", "-global_quality", &cq.to_string(),
+                    "-c:v", "hevc_qsv", "-preset", opts.qsv_preset, "-global_quality", &cq.to_string(),
                     "-profile:v", if ten_bit { "main10" } else { "main" },
                 ]),
                 Codec::Av1 => sv(&[
-                    "-c:v", "av1_qsv", "-preset", "veryslow", "-global_quality", &cq.to_string(),
+                    "-c:v", "av1_qsv", "-preset", opts.qsv_preset, "-global_quality", &cq.to_string(),
                     "-profile:v", "main",
                 ]),
             };

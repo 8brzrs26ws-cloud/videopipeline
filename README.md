@@ -73,8 +73,9 @@ np. `HEVC NVENC → AV1 NVENC → HEVC QSV`; pod listą widać, co wykryto. Pozo
 **F9 — kodowanie.** Okno pokazuje postęp każdego pliku, prędkość, ETA, log i obciążenie sprzętu:
 
 - NVIDIA: GPU, NVENC (koder), NVDEC (dekoder), VRAM — z `nvidia-smi`;
-- Intel: VIDEO (blok VDBox, który sprzętowo koduje i dekoduje — stąd jedna wartość), VPP (filtry: kadrowanie,
-  odszumianie, konwersja), RENDER, taktowanie i pamięć karty — z `/proc/<pid>/fdinfo` procesów ffmpeg, bez uprawnień roota;
+- Intel: VIDEO (blok VDBox, który sprzętowo koduje i dekoduje — stąd jedna wartość), FILTRY (kadrowanie, odszumianie
+  i konwersja formatu; sterownik wykonuje je na VEBox albo na jednostkach EU, więc pokazane jest większe z obciążeń),
+  taktowanie i pamięć karty — z `/proc/<pid>/fdinfo` procesów ffmpeg, bez uprawnień roota;
 - zawsze CPU i RAM.
 
 ![Okno kodowania — NVIDIA NVENC](docs/screenshots/kodowanie.png)
@@ -112,6 +113,7 @@ Przy starcie program wykrywa enkodery krótkim kodowaniem testowym (sama obecno�
 | `-av1` | AV1 zamiast HEVC (zawsze 10-bit; bez Dolby Vision i HDR10+) |
 | `--intel`, `--engine nvenc\|qsv\|vaapi` | wybór karty (wyżej) |
 | `-q N`, `--hevc-cq N`, `--av1-cq N` | jakość, 1–51, mniej = lepiej (domyślnie HEVC 19, AV1 25) |
+| `--qsv-preset P` | preset Intel QSV: `veryfast` … `veryslow` (domyślnie `slow`); `veryslow` na zintegrowanej grafice bywa kilka razy wolniejszy przy niewielkim zysku jakości |
 | `-pleac3` | polska ścieżka → E-AC-3 stereo 192 kb/s |
 | `-da` | dodatkowo angielskie audio (E-AC-3 5.1) oraz napisy EN i PL |
 | `-d` | łagodne odszumianie (tylko źródła SDR 8-bit; CUDA, vpp_qsv / denoise_vaapi albo CPU) |

@@ -25,6 +25,7 @@ const OPTION_HELP: [&str; OPTION_COUNT] = [
     "", // wiersz 0: opis budowany dynamicznie (wykryte enkodery)
     "Jakość HEVC: NVENC -cq, QSV ICQ, VAAPI QP; mniej = lepsza jakość. ←/→ ±1, PgUp/PgDn ±5.",
     "Jakość AV1: NVENC -cq, QSV ICQ, VAAPI QP×5; mniej = lepsza jakość. ←/→ ±1, PgUp/PgDn ±5.",
+    "Tylko Intel QSV: ← szybciej, → wolniej i nieco lepiej. veryslow bywa kilka razy wolniejszy od slow.",
     "Pierwsza polska ścieżka przekodowana do E-AC-3 2.0 192 kb/s.",
     "Bez tego: tylko polska ścieżka audio i brak napisów.",
     "NVIDIA: bilateral_cuda, Intel: vpp_qsv/denoise_vaapi, zapasowo hqdn3d (CPU); tylko SDR 8-bit.",
@@ -366,7 +367,7 @@ fn render_fkeys(f: &mut Frame, area: Rect) {
 // --------------------------------------------------------------- okienka ---
 
 fn render_options(f: &mut Frame, area: Rect, app: &App) {
-    let rect = centered(area, 78, 20);
+    let rect = centered(area, 78, 21);
     f.render_widget(Clear, rect);
     let block = dialog_block("Opcje videopipeline", BOX_QUEUE);
     let inner = block.inner(rect);
@@ -390,6 +391,14 @@ fn render_options(f: &mut Frame, area: Rect, app: &App) {
         ),
         ("Jakość HEVC — CQ   (--hevc-cq)".into(), format!("< {} >", o.hevc_cq)),
         ("Jakość AV1 — CQ   (--av1-cq)".into(), format!("< {} >", o.av1_cq)),
+        (
+            "Preset Intel QSV   (--qsv-preset)".into(),
+            if o.engine == Engine::Qsv {
+                format!("< {} >", o.qsv_preset)
+            } else {
+                format!("({}, tylko QSV) < {} >", o.engine.label(), o.qsv_preset)
+            },
+        ),
         (format!("{} Audio PL → E-AC-3 stereo 192k   (-pleac3)", chk(o.pl_eac3)), String::new()),
         (format!("{} Dodatkowo audio EN + napisy EN i PL   (-da)", chk(o.extra)), String::new()),
         (format!("{} Odszumianie SDR 8-bit   (-d)", chk(o.denoise)), String::new()),
@@ -680,8 +689,8 @@ fn run_lines(
 /// Jedna połowa wiersza: etykieta + miernik + procent (+ opcjonalny opis, np. "3.2/8.0G").
 fn half(label: &str, pct: Option<f64>, extra: &str, w: usize) -> Vec<Span<'static>> {
     let ex = if extra.is_empty() { 0 } else { extra.chars().count() + 1 };
-    let mw = w.saturating_sub(6 + 7 + ex);
-    let mut v = vec![Span::styled(pad(label, 6), fg(DIM))];
+    let mw = w.saturating_sub(7 + 7 + ex);
+    let mut v = vec![Span::styled(pad(label, 7), fg(DIM))];
     match pct {
         Some(p) => {
             v.extend(meter(p, mw));
@@ -719,11 +728,17 @@ fn intel_lines(s: &SysStats, i: &IntelStats, cw: usize) -> Vec<Line<'static>> {
         None => "pamięć GPU: brak danych".into(),
     };
     let header = format!("─ obciążenie · {}{freq}", i.name);
+    // Filtry vpp_qsv sterownik często wykonuje na jednostkach render (EU), a nie na VEBox —
+    // dlatego jeden wskaźnik: większe z obciążeń RENDER/COMPUTE i VIDEO-ENHANCE.
+    let filters = match (i.render, i.enhance) {
+        (Some(r), Some(e)) => Some(r.max(e)),
+        (r, e) => r.or(e),
+    };
     vec![
         Line::from(Span::styled(trunc(&header, cw), fg(BOX_QUEUE))),
-        pair(half("VIDEO", i.video, "kod+dek", w), half("VPP", i.enhance, "", w)),
-        pair(half("RENDER", i.render, "", w), half("CPU", s.cpu, "", w)),
-        pair(half("RAM", ram_pct, &ram_txt, w), vec![Span::styled(pad(&mem, w), fg(DIM))]),
+        pair(half("VIDEO", i.video, "kod+dek", w), half("FILTRY", filters, "vpp/EU", w)),
+        pair(half("CPU", s.cpu, "", w), half("RAM", ram_pct, &ram_txt, w)),
+        Line::from(Span::styled(trunc(&mem, cw), fg(DIM))),
     ]
 }
 

@@ -42,6 +42,9 @@ struct Cli {
     /// Wymuś silnik: nvenc, qsv albo vaapi (domyślnie NVIDIA NVENC, gdy jest dostępna)
     #[arg(long, value_parser = ["nvenc", "qsv", "vaapi"])]
     engine: Option<String>,
+    /// Preset QSV: veryfast, faster, fast, medium, slow, slower, veryslow (domyślnie slow)
+    #[arg(long = "qsv-preset", value_parser = QSV_PRESETS)]
+    qsv_preset: Option<String>,
     /// Pokaż wykryte enkodery GPU i zakończ
     #[arg(long)]
     detect: bool,
@@ -172,6 +175,11 @@ fn real_main() -> Result<i32> {
         engine: *picked.as_ref().unwrap_or(&Engine::Nvenc),
         hevc_cq: cli.hevc_cq.or(if cli.av1 { None } else { cli.cq }).unwrap_or(DEFAULT_HEVC_CQ),
         av1_cq: cli.av1_cq.or(if cli.av1 { cli.cq } else { None }).unwrap_or(DEFAULT_AV1_CQ),
+        qsv_preset: cli
+            .qsv_preset
+            .as_deref()
+            .and_then(|p| QSV_PRESETS.iter().copied().find(|x| *x == p))
+            .unwrap_or(DEFAULT_QSV_PRESET),
         pl_eac3: cli.pleac3,
         extra: cli.da,
         copy: cli.copy,
