@@ -256,6 +256,8 @@ while [[ $changed = 1 ]]; do
         while read -r dll; do
             lc="${dll,,}"
             [[ "$lc" =~ $SYSTEM_DLL ]] && continue
+            # Biblioteka systemowa Windows, jeśli MinGW-w64 ma dla niej bibliotekę importu (np. libauthz.a).
+            [[ -f "/usr/$TRIPLE/lib/lib${lc%.dll}.a" ]] && continue
             [[ -n "$(find "$PKG" -maxdepth 1 -iname "$dll" -print -quit)" ]] && continue
             src="$(find "${MINGW_DIRS[@]}" -maxdepth 1 -iname "$dll" -print -quit 2>/dev/null || true)"
             [[ -n "$src" ]] || fail "$(basename "$f") wymaga $dll, którego nie ma w pakiecie ani w MinGW"
