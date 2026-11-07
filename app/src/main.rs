@@ -75,7 +75,25 @@ fn main() {
     }
 }
 
+/// Pakiety (deb w /opt, AppImage) trzymają ffmpeg, mkvmerge itd. obok binarki — dopisujemy ten katalog
+/// do PATH, żeby narzędzia były znalezione także po ponownym uruchomieniu w terminalu.
+fn prepend_bundled_tools_to_path() {
+    let Ok(exe) = std::env::current_exe() else { return };
+    let Some(dir) = exe.parent() else { return };
+    if !dir.join("ffmpeg").is_file() {
+        return;
+    }
+    let mut paths = vec![dir.to_path_buf()];
+    if let Some(old) = std::env::var_os("PATH") {
+        paths.extend(std::env::split_paths(&old));
+    }
+    if let Ok(joined) = std::env::join_paths(paths) {
+        std::env::set_var("PATH", joined);
+    }
+}
+
 fn real_main() -> Result<i32> {
+    prepend_bundled_tools_to_path();
     // Zachowujemy składnię V9: -av1 / -pleac3 / -da (+ nowe -nocrop / -nodv / -nohdr10plus).
     let args = std::env::args().map(|a| match a.as_str() {
         "-av1" => "--av1".to_string(),

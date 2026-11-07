@@ -8,8 +8,9 @@
 #   build-essential nasm pkg-config clang patchelf file wget git mkvtoolnix libdav1d-dev zlib1g-dev
 #   + rustup/cargo. Uruchamiane w CI przez .github/workflows/release.yml, ale działa też lokalnie.
 #
-# Zmienne: VERSION, FFMPEG_VERSION, NVCODEC_HEADERS_REF (domyślnie master), DOVI_TOOL_REF, HDR10PLUS_TOOL_REF,
-# TARGET_CPU, JOBS, FORCE=1.
+# Zmienne: VERSION, FFMPEG_VERSION, NVCODEC_HEADERS_REF (domyślnie master), DOVI_TOOL_REF, HDR10PLUS_TOOL_REF
+# (dla trzech pierwszych narzędzi "latest" = najnowsze wydanie), INTEL=auto|1|0 (VAAPI + QSV/libvpl w ffmpeg),
+# TARGET_CPU, JOBS, FORCE=1. Zalecane uruchamianie: ./build-local.sh (Docker, Debian 13).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -22,6 +23,7 @@ NVCODEC_HEADERS_REF="${NVCODEC_HEADERS_REF:-}"
 DOVI_TOOL_REF="${DOVI_TOOL_REF:-2.3.4}"
 HDR10PLUS_TOOL_REF="${HDR10PLUS_TOOL_REF:-1.7.2}"
 TARGET_CPU="${TARGET_CPU:-x86-64-v3}"
+INTEL="${INTEL:-auto}"
 JOBS="${JOBS:-$(nproc)}"
 FORCE="${FORCE:-0}"
 
@@ -35,6 +37,20 @@ mkdir -p "$CACHE" "$WORK" "$DIST"
 log()  { printf '\n\033[1;32m==> %s\033[0m\n' "$*"; }
 fail() { printf '\n\033[1;31mBŁĄD: %s\033[0m\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || fail "brak polecenia: $1"; }
+
+# "latest" → najnowsze stabilne wydanie.
+latest_git_tag() {   # $1 = repo URL; zwraca najwyższy tag semver (bez prefiksu v)
+    git ls-remote --tags --refs "$1" | sed 's|.*refs/tags/||' | grep -E '^v?[0-9]+(\.[0-9]+)+$' \
+        | sed 's/^v//' | sort -V | tail -n1
+}
+if [[ "$FFMPEG_VERSION" = latest ]]; then
+    FFMPEG_VERSION="$(wget -qO- https://ffmpeg.org/releases/ | grep -oE 'ffmpeg-[0-9]+\.[0-9]+(\.[0-9]+)?\.tar\.xz' \
+        | sed -E 's/ffmpeg-(.*)\.tar\.xz/\1/' | sort -uV | tail -n1)"
+    [[ -n "$FFMPEG_VERSION" ]] || fail "nie udało się ustalić najnowszej wersji ffmpeg"
+fi
+[[ "$DOVI_TOOL_REF" = latest ]] && DOVI_TOOL_REF="$(latest_git_tag https://github.com/quietvoid/dovi_tool)"
+[[ "$HDR10PLUS_TOOL_REF" = latest ]] && HDR10PLUS_TOOL_REF="$(latest_git_tag https://github.com/quietvoid/hdr10plus_tool)"
+echo "Wersje: ffmpeg $FFMPEG_VERSION, dovi_tool $DOVI_TOOL_REF, hdr10plus_tool $HDR10PLUS_TOOL_REF"
 
 for c in cargo rustc gcc clang make nasm pkg-config git wget patchelf mkvmerge; do need "$c"; done
 pkg-config --exists dav1d || fail "brak libdav1d-dev (pkg-config dav1d)"
@@ -64,36 +80,66 @@ fi
 "$TOOLS/bin/hdr10plus_tool" --version
 
 # --------------------------------------------------------------------------- 3. ffmpeg
-log "3/5 ffmpeg $FFMPEG_VERSION (statyczny, NVENC/NVDEC/CUDA-LLVM, $TARGET_CPU)"
-# Katalog z sufiksem -gpl: stary cache bez --enable-gpl (bez hqdn3d) nie zostanie użyty ponownie.
-FFPREFIX="$CACHE/ffmpeg-$FFMPEG_VERSION-gpl"
+log "3/5 ffmpeg $FFMPEG_VERSION (statyczny, NVENC/NVDEC/CUDA-LLVM + Intel VAAPI/QSV jeśli dostępne, $TARGET_CPU)"
+# Intel (VAAPI + QSV przez libvpl): wymaga statycznych libva/libvpl; sterownik VA (iHD) zostaje po stronie hosta.
+intel_available() {
+    pkg-config --exists libva libva-drm vpl 2>/dev/null || return 1
+    [[ -f "$(pkg-config --variable=libdir libva)/libva.a" && -f "$(pkg-config --variable=libdir vpl)/libvpl.a" ]]
+}
+USE_INTEL=0
+case "$INTEL" in
+    0) ;;
+    1) intel_available || fail "INTEL=1, ale brak statycznych libva/libvpl (libva-dev, libvpl-dev)"; USE_INTEL=1 ;;
+    *) if intel_available; then USE_INTEL=1; else echo "UWAGA: brak statycznych libva/libvpl — ffmpeg bez Intela"; fi ;;
+esac
+
 NVH="$CACHE/nv-codec-headers"
-if [[ "$FORCE" = 1 || ! -x "$FFPREFIX/bin/ffmpeg" ]]; then
+prefix_for() { echo "$CACHE/ffmpeg-$FFMPEG_VERSION-gpl$([[ $1 = 1 ]] && echo -intel)"; }
+
+build_ffmpeg() {   # $1 = 1|0 (Intel); prefiks = prefix_for $1
+    local intel="$1" prefix; prefix="$(prefix_for "$1")"
+    local extra=()
+    [[ "$intel" = 1 ]] && extra=(--enable-vaapi --enable-libvpl)
     rm -rf "$NVH" "$WORK/nv-codec-headers"
     git clone --quiet https://github.com/FFmpeg/nv-codec-headers.git "$WORK/nv-codec-headers"
     [[ -n "$NVCODEC_HEADERS_REF" ]] && git -C "$WORK/nv-codec-headers" checkout --quiet "$NVCODEC_HEADERS_REF"
     make -C "$WORK/nv-codec-headers" PREFIX="$NVH" install >/dev/null
 
-    SRC="$WORK/ffmpeg-$FFMPEG_VERSION"
-    rm -rf "$SRC"
-    wget -q -O "$WORK/ffmpeg.tar.xz" "https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz"
-    tar -C "$WORK" -xf "$WORK/ffmpeg.tar.xz"
-
+    local src="$WORK/ffmpeg-$FFMPEG_VERSION"
+    rm -rf "$src"
+    [[ -f "$WORK/ffmpeg-$FFMPEG_VERSION.tar.xz" ]] \
+        || wget -q -O "$WORK/ffmpeg-$FFMPEG_VERSION.tar.xz" "https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz"
+    tar -C "$WORK" -xf "$WORK/ffmpeg-$FFMPEG_VERSION.tar.xz"
     (
-        cd "$SRC"
+        cd "$src"
         export PKG_CONFIG_PATH="$NVH/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
         ./configure \
-            --prefix="$FFPREFIX" \
+            --prefix="$prefix" \
             --pkg-config-flags=--static \
             --extra-cflags="-march=$TARGET_CPU -O2" \
             --enable-gpl \
             --disable-autodetect --disable-doc --disable-ffplay --disable-debug \
             --disable-shared --enable-static \
             --enable-ffnvcodec --enable-nvenc --enable-nvdec --enable-cuda --enable-cuda-llvm \
-            --enable-libdav1d --enable-zlib
+            --enable-libdav1d --enable-zlib "${extra[@]}"
         make -j"$JOBS"
         make install
     )
+}
+
+# Katalog z sufiksem (-gpl, -intel): stary cache o innej konfiguracji nie zostanie użyty ponownie.
+FFPREFIX="$(prefix_for "$USE_INTEL")"
+if [[ "$FORCE" = 1 || ! -x "$FFPREFIX/bin/ffmpeg" ]]; then
+    if ! build_ffmpeg "$USE_INTEL"; then
+        if [[ "$USE_INTEL" = 1 && "$INTEL" = auto ]]; then
+            echo "UWAGA: ffmpeg z Intelem się nie zbudował — próba bez Intela (INTEL=1 wymusza błąd)"
+            USE_INTEL=0
+            FFPREFIX="$(prefix_for 0)"
+            build_ffmpeg 0
+        else
+            fail "budowanie ffmpeg nie powiodło się"
+        fi
+    fi
 fi
 
 FFMPEG="$FFPREFIX/bin/ffmpeg"
@@ -107,6 +153,12 @@ done
 for f in hwupload_cuda hwdownload bilateral_cuda hqdn3d cropdetect; do
     grep -qw "$f" <<<"$FILTERS" || fail "ffmpeg bez filtra $f"
 done
+if [[ "$USE_INTEL" = 1 || "$FFPREFIX" == *-intel ]]; then
+    for e in hevc_qsv av1_qsv hevc_vaapi; do
+        grep -qw "$e" <<<"$ENCODERS" || fail "ffmpeg (Intel) bez enkodera $e"
+    done
+    echo "ffmpeg: Intel VAAPI + QSV włączone"
+fi
 "$FFMPEG" -hide_banner -version | sed -n 1p
 
 # --------------------------------------------------------------------------- 4. AppDir

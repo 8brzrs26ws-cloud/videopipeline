@@ -3,8 +3,9 @@
 | Składnik | Licencja | Źródło |
 |---|---|---|
 | VideoPipeline | GPL-3.0 | https://github.com/8brzrs26ws-cloud/videopipeline |
-| FFmpeg (ffmpeg, ffprobe; budowany z `--enable-gpl` — filtr hqdn3d jest na licencji GPL — bez `--enable-nonfree`; z ffnvcodec, NVENC/NVDEC, CUDA-LLVM, dav1d) | GPL-2.0+ | https://ffmpeg.org/download.html |
+| FFmpeg (ffmpeg, ffprobe; budowany z `--enable-gpl` — filtr hqdn3d jest na licencji GPL — bez `--enable-nonfree`; z ffnvcodec, NVENC/NVDEC, CUDA-LLVM, dav1d; opcjonalnie VAAPI i libvpl dla Intela) | GPL-2.0+ | https://ffmpeg.org/download.html |
 | nv-codec-headers (statycznie, tylko nagłówki) | MIT | https://github.com/FFmpeg/nv-codec-headers |
+| libva, libvpl (statycznie w ffmpeg, tylko gdy dostępne) | MIT / MIT | https://github.com/intel/libva, https://github.com/intel/libvpl |
 | dav1d (statycznie w ffmpeg) | BSD-2-Clause | https://code.videolan.org/videolan/dav1d |
 | MKVToolNix (mkvmerge) wraz z bibliotekami z dystrybucji Ubuntu | GPL-2.0 | https://mkvtoolnix.download/source.html |
 | dovi_tool | MIT | https://github.com/quietvoid/dovi_tool |

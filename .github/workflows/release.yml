@@ -1,12 +1,14 @@
-name: Release (AppImage x86-64-v3)
+name: Release (AppImage + deb, x86-64-v3)
 
+# Ta sama ścieżka co lokalnie: ./build-local.sh (Docker, Debian 13). Zwykle wydania robi się lokalnie
+# przez ./build-local.sh && ./release.sh vX.Y.Z — workflow jest zapasowy (ręczny lub po tagu).
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag wydania do utworzenia (np. v0.11.1). Puste = tylko artefakt do pobrania, bez wydania.'
+        description: 'Tag wydania do utworzenia (np. v0.11.1). Puste = tylko artefakty do pobrania.'
         required: false
         default: ''
 
@@ -14,37 +16,25 @@ permissions:
   contents: write
 
 jobs:
-  appimage:
-    runs-on: ubuntu-22.04
-    timeout-minutes: 120
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
-
-      - name: Zależności systemowe
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential nasm pkg-config clang patchelf file wget git ca-certificates xz-utils \
-            mkvtoolnix libdav1d-dev zlib1g-dev desktop-file-utils libfuse2
-
-      - uses: dtolnay/rust-toolchain@stable
 
       - name: Cache (ffmpeg, dovi_tool, hdr10plus_tool, linuxdeploy, cargo)
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            build/cache
-          key: appimage-${{ runner.os }}-${{ hashFiles('packaging/appimage/build-appimage.sh') }}
-          restore-keys: appimage-${{ runner.os }}-
+          path: build/cache
+          key: release-${{ runner.os }}-${{ hashFiles('packaging/appimage/build-appimage.sh', 'docker/Dockerfile') }}
+          restore-keys: release-${{ runner.os }}-
 
-      - name: Budowanie AppImage
-        run: packaging/appimage/build-appimage.sh
+      - name: Budowanie (Docker, Debian 13)
+        run: ./build-local.sh
 
       - uses: actions/upload-artifact@v4
         with:
-          name: VideoPipeline-AppImage
+          name: VideoPipeline-release
           path: dist/*
           if-no-files-found: error
 
