@@ -14,6 +14,15 @@ ENGINE="${DOCKER:-docker}"
 command -v "$ENGINE" >/dev/null || { echo "BŁĄD: brak polecenia $ENGINE" >&2; exit 1; }
 IMAGE="videopipeline-build:trixie"
 
+if ! "$ENGINE" info >/dev/null 2>&1; then
+    echo "BŁĄD: $ENGINE nie odpowiada (demon nie działa albo brak uprawnień)." >&2
+    echo "  Nie zainstalowany:      ./install-build-deps.sh" >&2
+    echo "  Demon wyłączony:        sudo systemctl enable --now docker" >&2
+    echo "  Brak uprawnień (grupa): sudo usermod -aG docker \$USER  i ponowne zalogowanie" >&2
+    echo "  Alternatywa bez demona: DOCKER=podman ./build-local.sh" >&2
+    exit 1
+fi
+
 mkdir -p build dist
 "$ENGINE" build -t "$IMAGE" docker
 

@@ -75,6 +75,7 @@ Na Archu/CachyOS: `bsdtar -xf videopipeline_*.deb data.tar.xz && sudo tar -C / -
 ### Budowanie wydań (lokalnie, Docker)
 Wydania budujemy w kontenerze Debian 13 (glibc 2.41), więc wynik nie zależy od systemu hosta:
 
+    ./install-build-deps.sh           # raz: Docker + buildx, git, gh (Arch/CachyOS i Debian/Ubuntu); potem wyloguj/zaloguj
     ./build-local.sh                  # dist/: AppImage, deb, sumy .sha256 (cache w ./build — kolejne budowania są szybkie)
     ./release.sh v0.11.1              # wysyła dist/ na GitHub (gh auth login); tworzy tag, jeśli go nie ma
 
