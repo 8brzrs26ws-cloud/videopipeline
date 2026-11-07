@@ -1,17 +1,22 @@
 //! Uruchamianie z menedżera plików (np. dwuklik w Dolphinie/KDE): gdy proces nie ma terminala,
 //! otwieramy własne okno terminala i uruchamiamy w nim ten sam program z tymi samymi argumentami.
+//! Windows: program konsolowy uruchomiony z Eksploratora sam dostaje okno konsoli — nic nie
+//! uruchamiamy ponownie, ale przy błędzie czekamy na Enter, zanim okno zniknie.
 use std::{
     env,
-    io::{self, BufRead, IsTerminal, Write},
-    process::Command,
+    io::{self, BufRead, Write},
 };
+#[cfg(not(windows))]
+use std::{io::IsTerminal, process::Command};
 
 const MARK: &str = "VIDEOPIPELINE_IN_TERMINAL";
 
+#[cfg(not(windows))]
 fn has_tty() -> bool {
     io::stdin().is_terminal() && io::stdout().is_terminal()
 }
 
+#[cfg(not(windows))]
 fn in_path(name: &str) -> bool {
     env::var_os("PATH")
         .map(|p| env::split_paths(&p).any(|d| d.join(name).is_file()))
@@ -19,6 +24,7 @@ fn in_path(name: &str) -> bool {
 }
 
 /// (program, argumenty poprzedzające polecenie). Kolejność: KDE najpierw.
+#[cfg(not(windows))]
 const TERMINALS: &[(&str, &[&str])] = &[
     ("konsole", &["-e"]),
     ("gnome-terminal", &["--"]),
@@ -31,8 +37,30 @@ const TERMINALS: &[(&str, &[&str])] = &[
     ("xterm", &["-e"]),
 ];
 
+/// Windows: konsola ma pojedynczy proces (nasz) = uruchomienie dwuklikiem z Eksploratora.
+#[cfg(windows)]
+fn own_console_window() -> bool {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetConsoleProcessList(list: *mut u32, count: u32) -> u32;
+    }
+    let mut pids = [0u32; 4];
+    // SAFETY: bufor na 4 identyfikatory, rozmiar przekazany w drugim argumencie.
+    let n = unsafe { GetConsoleProcessList(pids.as_mut_ptr(), pids.len() as u32) };
+    n == 1
+}
+
+#[cfg(windows)]
+pub fn relaunch_in_terminal() -> Option<i32> {
+    if own_console_window() {
+        env::set_var(MARK, "1"); // okno zniknie razem z programem — przy błędzie poczekaj na Enter
+    }
+    None
+}
+
 /// Jeśli nie ma terminala: uruchom się w nowym oknie i zwróć jego kod wyjścia.
 /// `None` = terminal jest (albo nie da się otworzyć) — kontynuuj normalnie.
+#[cfg(not(windows))]
 pub fn relaunch_in_terminal() -> Option<i32> {
     if has_tty() || env::var_os(MARK).is_some() {
         return None;

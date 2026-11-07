@@ -35,15 +35,11 @@ pub fn unregister(pid: u32) {
 /// Zatrzymuje wszystkie zarejestrowane procesy (TERM, potem KILL).
 pub fn kill_all() {
     let pids: Vec<u32> = PIDS.lock().map(|g| g.clone()).unwrap_or_default();
-    for sig in ["-TERM", "-KILL"] {
+    for force in [false, true] {
         for p in &pids {
-            let _ = Command::new("kill")
-                .arg(sig)
-                .arg(p.to_string())
-                .stderr(Stdio::null())
-                .status();
+            crate::platform::kill_pid(*p, force);
         }
-        if sig == "-TERM" {
+        if !force {
             thread::sleep(Duration::from_millis(500));
         }
     }

@@ -517,7 +517,7 @@ impl App {
                 let name = ctx.input.text().trim().to_string();
                 let from = ctx.from.clone();
                 let old_name = from.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-                if name.is_empty() || name == "." || name == ".." || name.contains('/') {
+                if name.is_empty() || name == "." || name == ".." || name.contains('/') || (cfg!(windows) && name.contains(['\\', ':'])) {
                     self.status_msg = "Niepoprawna nazwa (pusta, \".\", \"..\" albo z \"/\")".into();
                     return;
                 }
@@ -673,12 +673,7 @@ impl App {
 }
 
 fn expand_home(s: &str) -> PathBuf {
-    if let Some(rest) = s.strip_prefix("~/") {
-        if let Ok(home) = std::env::var("HOME") {
-            return PathBuf::from(home).join(rest);
-        }
-    }
-    PathBuf::from(s)
+    videopipeline_core::platform::expand_home(s)
 }
 
 // -------------------------------------------------------------------------

@@ -75,12 +75,12 @@ fn preflight_nvenc(opts: &Opts, rt: &mut Runtime) -> Result<()> {
 fn preflight_intel(opts: &Opts, rt: &mut Runtime) -> Result<()> {
     let enc = opts.engine.encoder(opts.codec);
     let Some(dev) = crate::hw::intel_render_node() else {
-        bail!("Nie znaleziono karty Intel (/dev/dri/renderD*) — {enc} niedostępny.");
+        bail!("Nie znaleziono karty Intel — {enc} niedostępny.");
     };
     if !crate::hw::test(opts.engine, opts.codec, Some(&dev)) {
         bail!(
-            "Test {enc} na {} nie powiódł się (sterownik iHD / runtime oneVPL?). Kodowanie nie zostanie rozpoczęte.",
-            dev.display()
+            "Test {enc} nie powiódł się ({}). Kodowanie nie zostanie rozpoczęte.",
+            if cfg!(windows) { "sterownik karty Intel?" } else { "sterownik iHD / runtime oneVPL?" }
         );
     }
     if opts.engine == Engine::Qsv {
@@ -97,7 +97,8 @@ fn preflight_intel(opts: &Opts, rt: &mut Runtime) -> Result<()> {
         (_, Codec::Av1) => format!("CQP qp {} (CQ {cq} × 5, skala AV1 0–255)", (cq as u32 * 5).min(255)),
         _ => format!("CQP qp {cq}"),
     };
-    plog!("Kodek wideo: {} — {quality} — karta Intel {}.", opts.codec_label(), dev.display());
+    let where_ = if cfg!(windows) { "D3D11".to_string() } else { dev.display().to_string() };
+    plog!("Kodek wideo: {} — {quality} — karta Intel ({where_}).", opts.codec_label());
     plog!(
         "Dekodowanie: {} (gdy kodek źródła nie jest obsługiwany sprzętowo — CPU).",
         if opts.engine == Engine::Qsv { "QSV" } else { "VAAPI" }

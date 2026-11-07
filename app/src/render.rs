@@ -33,7 +33,7 @@ const OPTION_HELP: [&str; OPTION_COUNT] = [
     "Bez ekstrakcji i wstrzykiwania Dolby Vision — wynik zostaje zwykłym HDR10.",
     "Bez ekstrakcji i wstrzykiwania HDR10+ — zostaje statyczny HDR10.",
     "Kopia do <źródło>/encoded, do 3 prób z weryfikacją SHA-512.",
-    "shutdown now po 10 s od końca (dowolny klawisz anuluje).",
+    "Wyłącza komputer 10 s po zakończeniu (dowolny klawisz anuluje).",
     "Enter — edytuj, Enter — zatwierdź, Esc — anuluj.",
 ];
 

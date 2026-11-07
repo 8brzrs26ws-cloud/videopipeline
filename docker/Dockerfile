@@ -1,4 +1,5 @@
-# Środowisko budowania wydań (AppImage + deb): Debian 13 "trixie" (glibc 2.41).
+# Środowisko budowania wydań: AppImage + deb (Debian 13 "trixie", glibc 2.41)
+# oraz kroskompilacja Windows x64 (MinGW-w64).
 # Obraz zawiera tylko narzędzia; kod, cache i wyniki są montowane z hosta (patrz build-local.sh).
 FROM debian:trixie
 
@@ -8,6 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates xz-utils zstd dpkg-dev fakeroot desktop-file-utils squashfs-tools \
         mkvtoolnix libdav1d-dev zlib1g-dev libmagic-mgc \
         libva-dev libdrm-dev libvpl-dev \
+        mingw-w64 libz-mingw-w64-dev meson ninja-build cmake 7zip zip \
     && rm -rf /var/lib/apt/lists/*
 
 # Rust (stable) w katalogu dostępnym dla każdego użytkownika; CARGO_HOME ustawia build-local.sh
@@ -15,6 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV RUSTUP_HOME=/opt/rustup \
     PATH=/opt/cargo/bin:$PATH
 RUN curl -sSf https://sh.rustup.rs | CARGO_HOME=/opt/cargo sh -s -- -y --profile minimal --default-toolchain stable \
+    && CARGO_HOME=/opt/cargo rustup target add x86_64-pc-windows-gnu \
     && chmod -R a+rX /opt/rustup /opt/cargo
 
 WORKDIR /src

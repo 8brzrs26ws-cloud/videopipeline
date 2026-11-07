@@ -4,6 +4,7 @@
 //! Silniki Intela: VIDEO (VCS / VDBox) koduje i dekoduje — sprzętowo to ten sam blok, więc
 //! obciążenie kodera i dekodera jest jedną wartością; VIDEO-ENHANCE (VECS) to filtry vpp
 //! (crop, skalowanie, odszumianie); RENDER/COMPUTE — shadery.
+#![cfg_attr(windows, allow(dead_code))]
 use std::{
     collections::HashMap,
     fs,

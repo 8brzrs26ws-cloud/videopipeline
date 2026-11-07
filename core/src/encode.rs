@@ -175,7 +175,7 @@ fn build_args_intel(
 
     match opts.engine {
         Engine::Qsv => {
-            v.extend(sv(&["-init_hw_device", &format!("vaapi=va:{dev}"), "-init_hw_device", "qsv=qs@va"]));
+            v.extend(crate::hw::qsv_init_args(&dev));
             v.extend(sv(&["-filter_hw_device", "qs"]));
             match qsv_decoder(rt, src_codec) {
                 Some(d) => {

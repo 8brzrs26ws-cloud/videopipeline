@@ -1,7 +1,8 @@
 # VideoPipeline
 
-VideoPipeline kompresuje filmy do HEVC albo AV1 na karcie graficznej: NVIDIA (NVENC) albo Intel (QSV, zapasowo VAAPI).
-Ma interfejs terminalowy w stylu Midnight Commandera, a podany z plikami działa jako zwykłe polecenie do skryptów.
+VideoPipeline kompresuje filmy do HEVC albo AV1 na karcie graficznej: NVIDIA (NVENC) albo Intel (QSV, na Linuksie
+zapasowo VAAPI). Działa na Linuksie i Windows. Ma interfejs terminalowy w stylu Midnight Commandera, a podany z plikami
+działa jako zwykłe polecenie do skryptów.
 
 ![Panele: pliki i kolejka kodowania](docs/screenshots/panele.png)
 
@@ -20,18 +21,19 @@ Ma interfejs terminalowy w stylu Midnight Commandera, a podany z plikami działa
 | Element | Wymaganie |
 |---|---|
 | Procesor | x86-64-v3 (AVX2, BMI2, FMA): Intel Haswell (4. gen. Core) / AMD Zen 1 lub nowszy |
-| System | Linux z glibc 2.41+ (np. CachyOS/Arch, Debian 13, Ubuntu 25.04) — dotyczy AppImage i deb |
+| System | Linux z glibc 2.41+ (np. CachyOS/Arch, Debian 13, Ubuntu 25.04) — AppImage i deb; Windows 10/11 x64 — .zip |
 | Karta NVIDIA | HEVC: GeForce GTX 10xx (Pascal) lub nowsza; AV1: RTX 40xx / 50xx. Sterownik 570 lub nowszy (`nvidia-smi` do monitora obciążenia) |
 | Karta Intel | HEVC: Core 7. gen. (Kaby Lake) lub nowszy; AV1: Arc (A/B), Core Ultra (Meteor Lake) lub nowszy |
-| Sterowniki Intel | `intel-media-driver` (iHD, VA-API) i runtime oneVPL: `vpl-gpu-rt` (Tiger Lake i nowsze) albo `intel-media-sdk` (starsze); na Debianie `intel-media-va-driver-non-free` i `libmfx-gen1.2`. Użytkownik musi mieć dostęp do `/dev/dri/renderD*` (grupa `render`) |
+| Sterowniki Intel | Linux: `intel-media-driver` (iHD, VA-API) i runtime oneVPL: `vpl-gpu-rt` (Tiger Lake i nowsze) albo `intel-media-sdk` (starsze); na Debianie `intel-media-va-driver-non-free` i `libmfx-gen1.2`; użytkownik w grupie `render`. Windows: aktualny sterownik grafiki Intel (zawiera runtime oneVPL) |
 | Miejsce na dysku | wolne miejsce w katalogu wyjściowym na pliki tymczasowe (rzędu rozmiaru wyniku) |
 
 Wystarczy jedna karta. Gdy w komputerze są obie, domyślnie koduje NVIDIA, a Intela wybiera się jawnie (niżej).
 
 ## Instalacja
 
-Gotowe pliki są na stronie [Releases](https://github.com/8brzrs26ws-cloud/videopipeline/releases). Oba warianty zawierają
-własne ffmpeg i ffprobe (z NVENC, QSV i VAAPI), mkvmerge, dovi_tool i hdr10plus_tool; sterowniki GPU pochodzą z systemu.
+Gotowe pliki są na stronie [Releases](https://github.com/8brzrs26ws-cloud/videopipeline/releases). Każdy wariant zawiera
+własne ffmpeg i ffprobe (NVENC i QSV; na Linuksie także VAAPI), mkvmerge, dovi_tool i hdr10plus_tool; sterowniki GPU
+pochodzą z systemu.
 
 **AppImage** (dowolna dystrybucja spełniająca wymagania):
 
@@ -43,13 +45,20 @@ własne ffmpeg i ffprobe (z NVENC, QSV i VAAPI), mkvmerge, dovi_tool i hdr10plus
 
     sudo apt install ./videopipeline_*_amd64.deb
 
-Na Archu/CachyOS najprościej użyć AppImage. Sumy kontrolne leżą obok plików (`.sha256`).
+Na Archu/CachyOS najprościej użyć AppImage.
+
+**Windows** — rozpakuj `VideoPipeline-*-windows-x86_64_v3.zip` i uruchom `videopipeline.exe` (dwuklik otwiera okno
+konsoli; najlepiej wygląda w Windows Terminal). Wszystkie pliki muszą zostać w jednym folderze. Pliki nie są podpisane
+cyfrowo, więc SmartScreen może poprosić o potwierdzenie. Pliki przeciągnięte na `videopipeline.exe` są od razu kodowane
+(tryb skryptowy). W lewym panelu, w katalogu głównym dysku, widać pozostałe dyski.
+
+Sumy kontrolne leżą obok plików (`.sha256`).
 
 ## Użycie
 
 ### Interfejs (TUI)
 
-Uruchomione bez argumentów (albo dwuklikiem — program sam otworzy okno terminala) pokazuje dwa panele:
+Uruchomione bez argumentów (albo dwuklikiem — program otworzy okno terminala lub konsoli) pokazuje dwa panele:
 po lewej pliki, po prawej kolejkę kodowania.
 
 | Klawisz | Działanie |
@@ -76,8 +85,9 @@ np. `HEVC NVENC → AV1 NVENC → HEVC QSV`; pod listą widać, co wykryto. Pozo
 
 - NVIDIA: GPU, NVENC (koder), NVDEC (dekoder), VRAM — z `nvidia-smi`;
 - Intel: VIDEO (blok VDBox, który sprzętowo koduje i dekoduje — stąd jedna wartość), FILTRY (kadrowanie, odszumianie
-  i konwersja formatu; sterownik wykonuje je na VEBox albo na jednostkach EU, więc pokazane jest większe z obciążeń),
-  taktowanie i pamięć karty — z `/proc/<pid>/fdinfo` procesów ffmpeg, bez uprawnień roota;
+  i konwersja formatu; sterownik wykonuje je na VEBox albo na jednostkach EU, więc pokazane jest większe z obciążeń)
+  i pamięć karty, liczone dla procesów ffmpeg, bez uprawnień administratora. Linux: `/proc/<pid>/fdinfo` (plus
+  taktowanie karty), Windows: liczniki wydajności „GPU Engine”, te same co w Menedżerze zadań;
 - zawsze CPU i RAM.
 
 ![Okno kodowania — NVIDIA NVENC](docs/screenshots/kodowanie.png)
@@ -104,9 +114,10 @@ Kod wyjścia: 0 — sukces, 1 — błędy, 130 — przerwano (Ctrl+C). `--tui` z
 Przy starcie program wykrywa enkodery krótkim kodowaniem testowym (sama obecność w ffmpeg nic nie znaczy).
 
 - Tylko NVIDIA albo tylko Intel — używana jest ta karta, bez żadnych flag.
-- Obie karty — domyślnie NVIDIA; Intel: `--intel` (QSV, a gdy nie działa — VAAPI) albo `--engine qsv|vaapi`.
+- Obie karty — domyślnie NVIDIA; Intel: `--intel` (QSV, a na Linuksie, gdy QSV nie działa — VAAPI) albo
+  `--engine qsv|vaapi`.
 - Na karcie Intel QSV dekoduje źródło sprzętowo (H.264, HEVC, AV1, VP9, MPEG-2, VC-1); kodek bez wsparcia sprzętowego
-  jest dekodowany na CPU. VAAPI dekoduje przez VA-API.
+  jest dekodowany na CPU. VAAPI dekoduje przez VA-API. Na Windows QSV działa przez D3D11, a VAAPI nie istnieje.
 
 ### Opcje
 
@@ -147,13 +158,17 @@ mkvmerge (mkvtoolnix), [dovi_tool](https://github.com/quietvoid/dovi_tool), [hdr
 Program to biblioteka z całą logiką (`core/`) i binarka z interfejsem (`app/`). Oba pliki muszą pochodzić z jednego builda
 i leżeć w tym samym katalogu (albo binarka w `bin/`, biblioteka w `../lib/`).
 
-### AppImage i deb (Docker)
+### Wydania: AppImage, deb i Windows (Docker)
 
-Wydania buduje się w kontenerze Debian 13, więc wynik nie zależy od systemu, na którym budujesz:
+Wydania buduje się w kontenerze Debian 13, więc wynik nie zależy od systemu, na którym budujesz. Wersja dla Windows
+powstaje tam przez kroskompilację (MinGW-w64, cel Rusta `x86_64-pc-windows-gnu`): aplikacja, dovi_tool, hdr10plus_tool,
+dav1d, libvpl i ffmpeg są kompilowane ze źródeł, a mkvmerge pochodzi z oficjalnej wersji przenośnej MKVToolNix.
 
     ./install-build-deps.sh     # raz: Docker, git, gh (Arch/CachyOS, Debian/Ubuntu); potem wyloguj się i zaloguj
-    ./build-local.sh            # dist/: AppImage, deb i sumy .sha256; cache w ./build
-    ./release.sh vX.Y.Z         # wysyła dist/ do GitHub Releases (wymaga gh auth login)
+    ./build-local.sh            # dist/: AppImage, deb, .zip dla Windows i sumy .sha256; cache w ./build
+    ./build-local.sh linux      # tylko AppImage i deb
+    ./build-local.sh windows    # tylko Windows
+    ./release.sh vX.Y.Z         # wysyła pliki tej wersji z dist/ do GitHub Releases (wymaga gh auth login)
 
 Zmienne dla `build-local.sh`:
 
@@ -161,7 +176,8 @@ Zmienne dla `build-local.sh`:
 |---|---|
 | `FFMPEG_VERSION` | wersja ffmpeg, domyślnie `latest` (najnowsze wydanie) |
 | `DOVI_TOOL_REF`, `HDR10PLUS_TOOL_REF` | tagi narzędzi (domyślnie przypięte), `latest` = najnowsze |
-| `INTEL` | `auto` (domyślnie), `1` — wymagaj QSV/VAAPI, `0` — bez Intela |
+| `INTEL` | Linux: `auto` (domyślnie), `1` — wymagaj QSV/VAAPI, `0` — bez Intela |
+| `DAV1D_REF`, `LIBVPL_REF`, `MKVTOOLNIX_VERSION` | Windows: wersje bibliotek i MKVToolNix, domyślnie `latest` |
 | `TARGET_CPU` | domyślnie `x86-64-v3` |
 | `FORCE=1` | przebuduj ffmpeg i narzędzia mimo cache |
 | `DOCKER=podman` | Podman zamiast Dockera |

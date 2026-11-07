@@ -21,6 +21,29 @@ fn shift_range(cur: usize, d: isize, len: usize) -> (std::ops::Range<usize>, usi
     (range, n)
 }
 
+/// Windows: istniejące dyski poza bieżącym, jako katalogi "C:".
+#[cfg(windows)]
+fn other_drives(cwd: &std::path::Path) -> Vec<Entry> {
+    let cur = cwd.to_string_lossy().to_uppercase();
+    (b'A'..=b'Z')
+        .map(|l| format!("{}:\\", l as char))
+        .filter(|d| !cur.starts_with(d.as_str()) && std::path::Path::new(d).is_dir())
+        .map(|d| Entry {
+            name: d.trim_end_matches('\\').to_string(),
+            path: PathBuf::from(&d),
+            is_dir: true,
+            is_up: false,
+            size: 0,
+            mtime: None,
+        })
+        .collect()
+}
+
+#[cfg(not(windows))]
+fn other_drives(_cwd: &std::path::Path) -> Vec<Entry> {
+    vec![]
+}
+
 pub struct Entry {
     pub name: String,
     pub path: PathBuf,
@@ -99,6 +122,9 @@ impl Browser {
                 size: 0,
                 mtime: None,
             });
+        } else {
+            // Windows: w katalogu głównym dysku pokaż pozostałe dyski (C:\ → D:\ …).
+            entries.extend(other_drives(&self.cwd));
         }
         entries.extend(dirs);
         entries.extend(files);

@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
 # Buduje lokalnie w Dockerze (Debian 13, glibc 2.41) wszystko do wydania:
-#   dist/VideoPipeline-<wersja>-x86_64_v3.AppImage  (+ .sha256)
-#   dist/videopipeline_<wersja>_amd64.deb
+#   dist/VideoPipeline-<wersja>-x86_64_v3.AppImage   (Linux, + .sha256)
+#   dist/videopipeline_<wersja>_amd64.deb            (Linux)
+#   dist/VideoPipeline-<wersja>-windows-x86_64_v3.zip (Windows x64, kroskompilacja MinGW)
 # Cache (ffmpeg, dovi_tool, hdr10plus_tool, crate'y) zostaje w ./build, więc kolejne budowania są szybkie.
 #
+# Użycie:  ./build-local.sh            # Linux i Windows
+#          ./build-local.sh linux      # tylko AppImage + deb
+#          ./build-local.sh windows    # tylko .zip dla Windows
+#
 # Zmienne (przekazywane do kontenera): FFMPEG_VERSION (domyślnie latest), DOVI_TOOL_REF, HDR10PLUS_TOOL_REF, NVCODEC_HEADERS_REF
-#   — wartość "latest" bierze najnowsze wydanie; INTEL=auto|1|0 (VAAPI/QSV w ffmpeg); TARGET_CPU; FORCE=1.
+#   — wartość "latest" bierze najnowsze wydanie; INTEL=auto|1|0 (VAAPI/QSV w ffmpeg); TARGET_CPU; FORCE=1;
+#   Windows: DAV1D_REF, LIBVPL_REF, MKVTOOLNIX_VERSION (domyślnie latest).
 # Silnik: docker lub podman (DOCKER=podman).
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
@@ -24,15 +30,22 @@ if ! "$ENGINE" info >/dev/null 2>&1; then
 fi
 
 mkdir -p build dist
-# dist/ zawiera tylko wynik bieżącego budowania (starsze wersje są na GitHub Releases).
-rm -f dist/*.AppImage dist/*.deb dist/*.sha256
+TARGETS="${*:-${TARGETS:-linux windows}}"
+for t in $TARGETS; do
+    [[ "$t" = linux || "$t" = windows ]] || { echo "BŁĄD: nieznany cel '$t' (linux, windows)" >&2; exit 1; }
+done
+export TARGETS
+# dist/ zawiera tylko wynik bieżącego budowania danego celu (starsze wersje są na GitHub Releases).
+[[ " $TARGETS " == *" linux "* ]] && rm -f dist/*.AppImage dist/*.AppImage.sha256 dist/*.deb dist/*.deb.sha256
+[[ " $TARGETS " == *" windows "* ]] && rm -f dist/*windows*.zip dist/*windows*.zip.sha256
 "$ENGINE" build -t "$IMAGE" docker
 
 # Domyślnie najnowszy stabilny ffmpeg (nadpisz np. FFMPEG_VERSION=7.1.1 dla powtarzalnego wydania).
 export FFMPEG_VERSION="${FFMPEG_VERSION:-latest}"
 
 PASS=()
-for v in FFMPEG_VERSION DOVI_TOOL_REF HDR10PLUS_TOOL_REF NVCODEC_HEADERS_REF INTEL TARGET_CPU FORCE JOBS VERSION; do
+for v in FFMPEG_VERSION DOVI_TOOL_REF HDR10PLUS_TOOL_REF NVCODEC_HEADERS_REF INTEL TARGET_CPU FORCE JOBS VERSION \
+         TARGETS DAV1D_REF LIBVPL_REF MKVTOOLNIX_VERSION; do
     [[ -n "${!v:-}" ]] && PASS+=(-e "$v=${!v}")
 done
 

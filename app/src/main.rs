@@ -13,6 +13,7 @@ use videopipeline_core::{
     config::*,
     files,
     hw::{self, HwInfo},
+    platform,
 };
 
 #[derive(Parser)]
@@ -96,7 +97,7 @@ fn main() {
 fn prepend_bundled_tools_to_path() {
     let Ok(exe) = std::env::current_exe() else { return };
     let Some(dir) = exe.parent() else { return };
-    if !dir.join("ffmpeg").is_file() {
+    if !platform::has_exe(dir, "ffmpeg") {
         return;
     }
     let mut paths = vec![dir.to_path_buf()];
@@ -130,7 +131,29 @@ fn pick_engine(cli: &Cli, hw: &HwInfo, codec: Codec) -> std::result::Result<Engi
     hw.default_engine(codec)
 }
 
+/// Wydania są kompilowane pod x86-64-v3 (AVX2, BMI2, FMA). Na starszym procesorze program
+/// zakończyłby się błędem „illegal instruction” — lepiej powiedzieć to wprost.
+/// (Linux AppImage sprawdza to też w AppRun; ten test działa na każdej platformie.)
+fn cpu_ok() -> bool {
+    #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+    {
+        std::is_x86_feature_detected!("avx2")
+            && std::is_x86_feature_detected!("bmi2")
+            && std::is_x86_feature_detected!("fma")
+    }
+    #[cfg(not(all(target_arch = "x86_64", target_feature = "avx2")))]
+    {
+        true
+    }
+}
+
 fn real_main() -> Result<i32> {
+    if !cpu_ok() {
+        eprintln!("Ta wersja VideoPipeline wymaga procesora x86-64-v3 (AVX2, BMI2, FMA):");
+        eprintln!("Intel Haswell (Core 4. gen.) / AMD Zen 1 lub nowszego.");
+        term::wait_for_enter_if_relaunched();
+        return Ok(1);
+    }
     prepend_bundled_tools_to_path();
     // Zachowujemy składnię V9: -av1 / -pleac3 / -da (+ nowe -nocrop / -nodv / -nohdr10plus).
     let args = std::env::args().map(|a| match a.as_str() {
@@ -160,7 +183,9 @@ fn real_main() -> Result<i32> {
     }
 
     // TUI uruchomione dwuklikiem nie ma terminala — najpierw własne okno, dopiero potem wykrywanie.
-    if !script {
+    // Windows: pliki przeciągnięte na videopipeline.exe uruchamiają tryb skryptowy we własnym oknie
+    // konsoli — oznaczamy je, żeby okno nie zniknęło przed przeczytaniem wyniku.
+    if !script || cfg!(windows) {
         if let Some(code) = term::relaunch_in_terminal() {
             return Ok(code);
         }
@@ -169,7 +194,6 @@ fn real_main() -> Result<i32> {
     let hw = hw::detect();
     let picked = pick_engine(&cli, &hw, codec);
 
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
     let opts = Opts {
         codec,
         engine: *picked.as_ref().unwrap_or(&Engine::Nvenc),
@@ -188,7 +212,7 @@ fn real_main() -> Result<i32> {
         no_dv: cli.no_dv,
         no_hdr10plus: cli.no_hdr10plus,
         shutdown: cli.shutdown,
-        output_dir: PathBuf::from(home).join("Wideo"),
+        output_dir: platform::default_output_dir(),
     };
 
     // Tryb skryptowy: żadnego ratatui, tylko zwykły tekst — mniej RAM-u.
@@ -199,7 +223,11 @@ fn real_main() -> Result<i32> {
             Err(e) => anyhow::bail!("{e}"),
         };
         let paths = if cli.paths.is_empty() { vec![PathBuf::from(".")] } else { cli.paths };
-        return cli::run(opts, paths);
+        let code = cli::run(opts, paths)?;
+        if cfg!(windows) {
+            term::wait_for_enter_if_relaunched(); // okno konsoli z Eksploratora
+        }
+        return Ok(code);
     }
 
     let _pause = term::PauseOnExit::new(); // gdy okno terminala było nasze: pokaż błąd przed zamknięciem
@@ -224,7 +252,7 @@ fn real_main() -> Result<i32> {
     app::run(&mut app)?;
 
     if app.do_shutdown {
-        let _ = std::process::Command::new("shutdown").arg("now").status();
+        platform::shutdown_now();
     }
     Ok(0)
 }

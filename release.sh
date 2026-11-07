@@ -12,7 +12,8 @@ CARGO_VER="$(grep -m1 '^version' app/Cargo.toml | cut -d'"' -f2)"
 
 shopt -s nullglob
 FILES=(dist/VideoPipeline-"$VER"-*.AppImage dist/VideoPipeline-"$VER"-*.AppImage.sha256
-       dist/videopipeline_"$VER"_*.deb dist/videopipeline_"$VER"_*.deb.sha256)
+       dist/videopipeline_"$VER"_*.deb dist/videopipeline_"$VER"_*.deb.sha256
+       dist/VideoPipeline-"$VER"-windows-*.zip dist/VideoPipeline-"$VER"-windows-*.zip.sha256)
 [[ ${#FILES[@]} -gt 0 ]] || { echo "BŁĄD: brak plików wersji $VER w dist/ — najpierw ./build-local.sh" >&2; exit 1; }
 printf 'Wysyłam:\n'; printf '  %s\n' "${FILES[@]}"
 

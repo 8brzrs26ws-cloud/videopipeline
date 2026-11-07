@@ -1,11 +1,13 @@
 //! Monitoring obciążenia: NVIDIA GPU/NVENC/NVDEC/VRAM (nvidia-smi w pętli), Intel VIDEO/VPP/RENDER
 //! (fdinfo naszych procesów ffmpeg — patrz intelmon), CPU i RAM (/proc).
-use crate::{
-    config::Engine,
-    intelmon::{IntelSampler, IntelStats},
-};
+use crate::{config::Engine, intelmon::IntelStats};
+
+// Obciążenie karty Intel: Linux — fdinfo (i915/xe), Windows — liczniki wydajności „GPU Engine”.
+#[cfg(not(windows))]
+use crate::intelmon::IntelSampler;
+#[cfg(windows)]
+use crate::winmon::GpuEngineSampler as IntelSampler;
 use std::{
-    fs,
     path::Path,
     io::{BufRead, BufReader},
     process::{Command, Stdio},
@@ -173,7 +175,7 @@ impl Drop for Monitor {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::SeqCst);
         if let Some(p) = self.pid.lock().ok().and_then(|g| *g) {
-            let _ = Command::new("kill").arg("-TERM").arg(p.to_string()).stderr(Stdio::null()).status();
+            crate::platform::kill_pid(p, false);
         }
         if let Some(t) = self.thread.take() {
             let _ = t.join();
@@ -181,8 +183,12 @@ impl Drop for Monitor {
     }
 }
 
+#[cfg(windows)]
+use crate::winmon::{read_cpu, read_mem};
+
+#[cfg(not(windows))]
 fn read_cpu() -> Option<(u64, u64)> {
-    let text = fs::read_to_string("/proc/stat").ok()?;
+    let text = std::fs::read_to_string("/proc/stat").ok()?;
     let line = text.lines().next()?;
     let v: Vec<u64> = line.split_whitespace().skip(1).filter_map(|x| x.parse().ok()).collect();
     if v.len() < 5 {
@@ -193,8 +199,9 @@ fn read_cpu() -> Option<(u64, u64)> {
 }
 
 /// (MemTotal, MemAvailable) w bajtach.
+#[cfg(not(windows))]
 fn read_mem() -> Option<(u64, u64)> {
-    let text = fs::read_to_string("/proc/meminfo").ok()?;
+    let text = std::fs::read_to_string("/proc/meminfo").ok()?;
     let get = |key: &str| -> Option<u64> {
         text.lines()
             .find(|l| l.starts_with(key))?

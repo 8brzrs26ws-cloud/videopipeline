@@ -3,7 +3,6 @@
 //! runtime'u oneVPL), więc każdy kandydat przechodzi krótkie, prawdziwe kodowanie testowe.
 use crate::config::{Codec, Engine};
 use std::{
-    fs,
     path::{Path, PathBuf},
     process::{Command, Stdio},
     thread,
@@ -89,15 +88,33 @@ impl HwInfo {
     }
 }
 
-/// Węzeł renderD karty Intel (vendor 0x8086). Przy kilku kartach Intel — pierwszy.
+/// Windows nie ma węzłów /dev/dri: kartę Intel wybiera D3D11 po identyfikatorze producenta.
+/// Zwracany „węzeł” to tylko znacznik — czy karta naprawdę jest, rozstrzyga kodowanie testowe.
+#[cfg(windows)]
 pub fn intel_render_node() -> Option<PathBuf> {
-    let mut nodes: Vec<String> = fs::read_dir("/sys/class/drm")
+    Some(PathBuf::from("vendor_id=0x8086"))
+}
+
+/// Argumenty ffmpeg tworzące urządzenie QSV „qs” na karcie Intel
+/// (Linux: przez VA-API na węźle renderD, Windows: przez D3D11 karty o vendor_id 0x8086).
+pub fn qsv_init_args(dev: &str) -> Vec<String> {
+    if cfg!(windows) {
+        sv(&["-init_hw_device", "d3d11va=dx:,vendor_id=0x8086", "-init_hw_device", "qsv=qs@dx"])
+    } else {
+        sv(&["-init_hw_device", &format!("vaapi=va:{dev}"), "-init_hw_device", "qsv=qs@va"])
+    }
+}
+
+/// Węzeł renderD karty Intel (vendor 0x8086). Przy kilku kartach Intel — pierwszy.
+#[cfg(not(windows))]
+pub fn intel_render_node() -> Option<PathBuf> {
+    let mut nodes: Vec<String> = std::fs::read_dir("/sys/class/drm")
         .ok()?
         .filter_map(|e| e.ok())
         .map(|e| e.file_name().to_string_lossy().to_string())
         .filter(|n| n.starts_with("renderD"))
         .filter(|n| {
-            fs::read_to_string(format!("/sys/class/drm/{n}/device/vendor"))
+            std::fs::read_to_string(format!("/sys/class/drm/{n}/device/vendor"))
                 .map(|v| v.trim() == "0x8086")
                 .unwrap_or(false)
         })
@@ -117,8 +134,7 @@ fn test_args(e: Engine, c: Codec, dev: Option<&Path>) -> Option<Vec<String>> {
     match e {
         Engine::Nvenc => {}
         Engine::Qsv => {
-            let d = dev?;
-            v.extend(sv(&["-init_hw_device", &format!("vaapi=va:{d}"), "-init_hw_device", "qsv=qs@va"]));
+            v.extend(qsv_init_args(&dev?));
             v.extend(sv(&["-filter_hw_device", "qs"]));
         }
         Engine::Vaapi => {
@@ -194,6 +210,10 @@ pub fn detect() -> HwInfo {
     let mut jobs = vec![];
     for e in Engine::ALL {
         if e.is_intel() && intel_dev.is_none() {
+            continue;
+        }
+        // VA-API istnieje tylko na Linuksie; na Windows Intel koduje przez QSV (D3D11).
+        if cfg!(windows) && e == Engine::Vaapi {
             continue;
         }
         for c in [Codec::Hevc, Codec::Av1] {

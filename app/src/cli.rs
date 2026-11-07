@@ -3,7 +3,6 @@ use anyhow::Result;
 use std::{
     collections::HashMap,
     path::PathBuf,
-    process::Command,
     sync::{Arc, Mutex},
     thread,
     time::{Duration, Instant},
@@ -141,7 +140,7 @@ pub fn run(opts: Opts, paths: Vec<PathBuf>) -> Result<i32> {
             thread::sleep(Duration::from_secs(1));
         }
         if !proc::cancelled() {
-            let _ = Command::new("shutdown").arg("now").status();
+            videopipeline_core::platform::shutdown_now();
         }
     }
     Ok(if errors.is_empty() { 0 } else { 1 })
