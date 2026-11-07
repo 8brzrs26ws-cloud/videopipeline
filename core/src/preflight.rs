@@ -97,7 +97,14 @@ fn preflight_intel(opts: &Opts, rt: &mut Runtime) -> Result<()> {
         (_, Codec::Av1) => format!("CQP qp {} (CQ {cq} × 5, skala AV1 0–255)", (cq as u32 * 5).min(255)),
         _ => format!("CQP qp {cq}"),
     };
-    let where_ = if cfg!(windows) { "D3D11".to_string() } else { dev.display().to_string() };
+    let d = dev.to_string_lossy();
+    let where_ = if !cfg!(windows) {
+        d.to_string()
+    } else if crate::hw::qsv_is_sysmem(&d) {
+        "Windows, klatki przez pamięć systemową".to_string()
+    } else {
+        format!("Windows, {d}")
+    };
     plog!("Kodek wideo: {} — {quality} — karta Intel ({where_}).", opts.codec_label());
     plog!(
         "Dekodowanie: {} (gdy kodek źródła nie jest obsługiwany sprzętowo — CPU).",

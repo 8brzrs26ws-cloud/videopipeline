@@ -175,9 +175,18 @@ fn build_args_intel(
 
     match opts.engine {
         Engine::Qsv => {
+            // Windows, tryb "sysmem": bez urządzenia i pul ramek ffmpeg (patrz hw::WIN_QSV_DEVICES) —
+            // dekoder QSV oddaje klatki do pamięci, filtry CPU, koder QSV sam wgrywa je na kartę.
+            let sysmem = crate::hw::qsv_is_sysmem(&dev);
             v.extend(crate::hw::qsv_init_args(&dev));
-            v.extend(sv(&["-filter_hw_device", "qs"]));
+            if !sysmem {
+                v.extend(sv(&["-filter_hw_device", "qs"]));
+            }
             match qsv_decoder(rt, src_codec) {
+                Some(d) if sysmem => {
+                    v.extend(sv(&["-c:v", &d]));
+                    decoder = format!("QSV ({d}, przez pamięć)");
+                }
                 Some(d) => {
                     v.extend(sv(&["-hwaccel", "qsv", "-hwaccel_device", "qs", "-hwaccel_output_format", "qsv"]));
                     v.extend(sv(&["-c:v", &d]));
@@ -188,17 +197,30 @@ fn build_args_intel(
             v.push("-i".into());
             v.push(a.input_file.to_string_lossy().into());
 
-            // vpp_qsv przyjmuje klatki z karty i z pamięci (dekodowanie programowe) — jeden filtr na wszystko.
-            let mut vpp: Vec<String> = vec![];
-            if let Some((w, h, x, y)) = crop {
-                vpp.push(format!("cw={w}:ch={h}:cx={x}:cy={y}"));
+            if sysmem {
+                let mut chain: Vec<String> = vec![];
+                if let Some(cr) = &a.crop {
+                    chain.push(cr.clone());
+                }
+                if denoise {
+                    chain.push(DENOISE_CPU_FILTER.into());
+                    notes.push("denoise CPU".into());
+                }
+                chain.push(format!("format={}", if ten_bit { "p010le" } else { "nv12" }));
+                v.extend(sv(&["-vf", &chain.join(",")]));
+            } else {
+                // vpp_qsv przyjmuje klatki z karty i z pamięci (dekodowanie programowe) — jeden filtr na wszystko.
+                let mut vpp: Vec<String> = vec![];
+                if let Some((w, h, x, y)) = crop {
+                    vpp.push(format!("cw={w}:ch={h}:cx={x}:cy={y}"));
+                }
+                if denoise && rt.denoise == Denoise::Intel {
+                    vpp.push(format!("denoise={DENOISE_QSV_LEVEL}"));
+                    notes.push("denoise vpp_qsv".into());
+                }
+                vpp.push(format!("format={}", if ten_bit { "p010" } else { "nv12" }));
+                v.extend(sv(&["-vf", &format!("vpp_qsv={}", vpp.join(":"))]));
             }
-            if denoise && rt.denoise == Denoise::Intel {
-                vpp.push(format!("denoise={DENOISE_QSV_LEVEL}"));
-                notes.push("denoise vpp_qsv".into());
-            }
-            vpp.push(format!("format={}", if ten_bit { "p010" } else { "nv12" }));
-            v.extend(sv(&["-vf", &format!("vpp_qsv={}", vpp.join(":"))]));
 
             enc = match opts.codec {
                 Codec::Hevc => sv(&[

@@ -91,8 +91,19 @@ impl HwInfo {
 /// Windows: sposoby utworzenia urządzenia QSV, próbowane po kolei przy wykrywaniu.
 /// 1) oneVPL sam wybiera kartę Intel (dispatcher widzi tylko runtime Intela, więc NVIDIA nie przeszkadza),
 ///    z D3D11 jako urządzeniem pomocniczym; 2) najpierw D3D11 na karcie o vendor_id 0x8086, potem QSV z niego.
-pub const WIN_QSV_DEVICES: [&str; 2] =
-    ["qsv=qs:hw_any,child_device_type=d3d11va", "d3d11va=dx:,vendor_id=0x8086"];
+/// 3) "sysmem": bez urządzenia ffmpeg — klatki trafiają do kodera/z dekodera QSV przez pamięć systemową,
+///    a QSV sam zarządza powierzchniami na karcie. Omija błąd tworzenia tekstur D3D11 (0x80070057),
+///    który na części sterowników Intela blokuje hwupload i pule ramek ffmpeg.
+pub const WIN_QSV_DEVICES: [&str; 3] =
+    ["qsv=qs:hw_any,child_device_type=d3d11va", "d3d11va=dx:,vendor_id=0x8086", QSV_SYSMEM];
+
+/// Tryb QSV przez pamięć systemową (Windows) — patrz WIN_QSV_DEVICES.
+pub const QSV_SYSMEM: &str = "sysmem";
+
+/// Czy dany opis urządzenia oznacza tryb przez pamięć systemową.
+pub fn qsv_is_sysmem(dev: &str) -> bool {
+    dev == QSV_SYSMEM
+}
 
 /// Wybrany (działający) sposób — ustawiany przez wykrywanie, używany przez preflight i kodowanie.
 static WIN_QSV_CHOSEN: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
@@ -109,7 +120,9 @@ pub fn intel_render_node() -> Option<PathBuf> {
 /// (Linux: przez VA-API na węźle renderD, Windows: według opisu z WIN_QSV_DEVICES).
 pub fn qsv_init_args(dev: &str) -> Vec<String> {
     if cfg!(windows) {
-        if dev.starts_with("d3d11va") {
+        if qsv_is_sysmem(dev) {
+            vec![]
+        } else if dev.starts_with("d3d11va") {
             sv(&["-init_hw_device", dev, "-init_hw_device", "qsv=qs@dx"])
         } else {
             sv(&["-init_hw_device", dev])
@@ -170,17 +183,21 @@ fn test_args(e: Engine, c: Codec, dev: Option<&Path>) -> Option<Vec<String>> {
     match e {
         Engine::Nvenc => {}
         Engine::Qsv => {
-            v.extend(qsv_init_args(&dev?));
-            v.extend(sv(&["-filter_hw_device", "qs"]));
+            let d = dev.clone()?;
+            v.extend(qsv_init_args(&d));
+            if !qsv_is_sysmem(&d) {
+                v.extend(sv(&["-filter_hw_device", "qs"]));
+            }
         }
         Engine::Vaapi => {
-            let d = dev?;
+            let d = dev.clone()?;
             v.extend(sv(&["-init_hw_device", &format!("vaapi=va:{d}"), "-filter_hw_device", "va"]));
         }
     }
     v.extend(sv(&["-f", "lavfi", "-i", "color=c=black:s=320x240:r=25:d=0.3", "-frames:v", "5", "-an"]));
     match e {
         Engine::Nvenc => v.extend(sv(&["-pix_fmt", "yuv420p"])),
+        Engine::Qsv if dev.as_deref().is_some_and(qsv_is_sysmem) => v.extend(sv(&["-pix_fmt", "nv12"])),
         Engine::Qsv => v.extend(sv(&["-vf", "format=nv12,hwupload=extra_hw_frames=16"])),
         Engine::Vaapi => v.extend(sv(&["-vf", "format=nv12,hwupload"])),
     }
