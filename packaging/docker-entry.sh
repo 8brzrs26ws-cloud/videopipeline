@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Uruchamiane WEWNĄTRZ kontenera (docker/Dockerfile).
-# TARGETS: "linux" (AppImage + deb z tego samego drzewa plików), "windows" (.zip), domyślnie oba.
+# TARGETS: "linux" (AppImage, deb i pakiet Arch z tego samego drzewa plików), "windows" (.zip), domyślnie oba.
 set -euo pipefail
 trap 'echo "BŁĄD: budowanie przerwane (linia $LINENO: $BASH_COMMAND)" >&2' ERR
 mkdir -p "$HOME"
@@ -13,6 +13,7 @@ TARGETS="${TARGETS:-linux windows}"
 if [[ " $TARGETS " == *" linux "* ]]; then
     bash packaging/appimage/build-appimage.sh
     bash packaging/deb/build-deb.sh
+    bash packaging/arch/build-arch.sh
 fi
 if [[ " $TARGETS " == *" windows "* ]]; then
     bash packaging/windows/build-windows.sh

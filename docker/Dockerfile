@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates xz-utils zstd dpkg-dev fakeroot desktop-file-utils squashfs-tools \
         mkvtoolnix libdav1d-dev zlib1g-dev libmagic-mgc \
         libva-dev libdrm-dev libvpl-dev \
-        mingw-w64 libz-mingw-w64-dev meson ninja-build cmake 7zip zip \
+        mingw-w64 libz-mingw-w64-dev meson ninja-build cmake 7zip zip libarchive-tools \
     && rm -rf /var/lib/apt/lists/*
 
 # Rust (stable) w katalogu dostępnym dla każdego użytkownika; CARGO_HOME ustawia build-local.sh

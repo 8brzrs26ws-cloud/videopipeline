@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Buduje lokalnie w Dockerze (Debian 13, glibc 2.41) wszystko do wydania:
 #   dist/VideoPipeline-<wersja>-x86_64_v3.AppImage   (Linux, + .sha256)
-#   dist/videopipeline_<wersja>_amd64.deb            (Linux)
+#   dist/videopipeline_<wersja>_amd64.deb            (Debian/Ubuntu)
+#   dist/videopipeline-<wersja>-1-x86_64.pkg.tar.zst (Arch/CachyOS)
 #   dist/VideoPipeline-<wersja>-windows-x86_64_v3.zip (Windows x64, kroskompilacja MinGW)
 # Cache (ffmpeg, dovi_tool, hdr10plus_tool, crate'y) zostaje w ./build, więc kolejne budowania są szybkie.
 #
 # Użycie:  ./build-local.sh            # Linux i Windows
-#          ./build-local.sh linux      # tylko AppImage + deb
+#          ./build-local.sh linux      # tylko AppImage, deb i pakiet Arch
 #          ./build-local.sh windows    # tylko .zip dla Windows
 #
 # Zmienne (przekazywane do kontenera): FFMPEG_VERSION (domyślnie latest), DOVI_TOOL_REF, HDR10PLUS_TOOL_REF, NVCODEC_HEADERS_REF
@@ -36,7 +37,7 @@ for t in $TARGETS; do
 done
 export TARGETS
 # dist/ zawiera tylko wynik bieżącego budowania danego celu (starsze wersje są na GitHub Releases).
-[[ " $TARGETS " == *" linux "* ]] && rm -f dist/*.AppImage dist/*.AppImage.sha256 dist/*.deb dist/*.deb.sha256
+[[ " $TARGETS " == *" linux "* ]] && rm -f dist/*.AppImage dist/*.AppImage.sha256 dist/*.deb dist/*.deb.sha256 dist/*.pkg.tar.zst dist/*.pkg.tar.zst.sha256
 [[ " $TARGETS " == *" windows "* ]] && rm -f dist/*windows*.zip dist/*windows*.zip.sha256
 # Sieć hosta zamiast mostka Dockera: kontener tylko pobiera źródła, a mostek (veth) potrafi nie działać,
 # np. po aktualizacji jądra bez restartu ("failed to add the host <=> sandbox pair interfaces").

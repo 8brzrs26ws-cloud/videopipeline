@@ -45,7 +45,12 @@ pochodzą z systemu.
 
     sudo apt install ./videopipeline_*_amd64.deb
 
-Na Archu/CachyOS najprościej użyć AppImage.
+**Arch Linux / CachyOS** — pakiet pacmana, też do `/opt/videopipeline`, z poleceniem `videopipeline` i wpisem w menu:
+
+    sudo pacman -U videopipeline-*-x86_64.pkg.tar.zst
+    sudo pacman -R videopipeline              # odinstalowanie
+
+Do kodowania na Intelu doinstaluj `intel-media-driver` i `vpl-gpu-rt`; na NVIDII wystarczy sterownik (`nvidia-utils`).
 
 **Windows** — rozpakuj `VideoPipeline-*-windows-x86_64_v3.zip` i uruchom `videopipeline.exe` (dwuklik otwiera okno
 konsoli; najlepiej wygląda w Windows Terminal). Wszystkie pliki muszą zostać w jednym folderze. Pliki nie są podpisane
@@ -158,7 +163,8 @@ Potrzebne: Rust (stable) oraz w `PATH`: ffmpeg i ffprobe z obsługą wybranej ka
 mkvmerge (mkvtoolnix), [dovi_tool](https://github.com/quietvoid/dovi_tool), [hdr10plus_tool](https://github.com/quietvoid/hdr10plus_tool).
 
     ./build.sh       # target/release/videopipeline + libvideopipeline_core.so
-    ./install.sh     # opcjonalnie: ~/.local/bin, ikona i wpis w menu
+    ./install.sh     # opcjonalnie: ~/.local/bin (z biblioteką libstd Rusta), ikona i wpis w menu
+    ./uninstall.sh   # usuwa to, co zainstalował install.sh
 
 Program to biblioteka z całą logiką (`core/`) i binarka z interfejsem (`app/`). Oba pliki muszą pochodzić z jednego builda
 i leżeć w tym samym katalogu (albo binarka w `bin/`, biblioteka w `../lib/`).
@@ -170,8 +176,8 @@ powstaje tam przez kroskompilację (MinGW-w64, cel Rusta `x86_64-pc-windows-gnu`
 dav1d, libvpl i ffmpeg są kompilowane ze źródeł, a mkvmerge pochodzi z oficjalnej wersji przenośnej MKVToolNix.
 
     ./install-build-deps.sh     # raz: Docker, git, gh (Arch/CachyOS, Debian/Ubuntu); potem wyloguj się i zaloguj
-    ./build-local.sh            # dist/: AppImage, deb, .zip dla Windows i sumy .sha256; cache w ./build
-    ./build-local.sh linux      # tylko AppImage i deb
+    ./build-local.sh            # dist/: AppImage, deb, pakiet Arch, .zip dla Windows i sumy .sha256; cache w ./build
+    ./build-local.sh linux      # tylko AppImage, deb i pakiet Arch
     ./build-local.sh windows    # tylko Windows
     ./release.sh vX.Y.Z         # wysyła pliki tej wersji z dist/ do GitHub Releases (wymaga gh auth login)
 
