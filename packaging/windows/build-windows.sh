@@ -57,9 +57,10 @@ rustup target list --installed 2>/dev/null | grep -qx "$RTARGET" \
 # ------------------------------------------------------------------ wersje "latest"
 # Każde ustalenie wersji jest odporne na pipefail i kończy się czytelnym błędem (wcześniej skrypt
 # potrafił zakończyć się bez komunikatu, gdy np. strona z listą wersji nie odpowiedziała).
+export GIT_TERMINAL_PROMPT=0   # git ls-remote nie może pytać o login (repozytorium niedostępne = brak wyniku)
 latest_git_tag() {   # $1 = repo, $2 = opcjonalny prefiks tagu (np. "release-"); najwyższy tag semver
     local pre="${2:-}"
-    { git ls-remote --tags --refs "$1" 2>/dev/null || true; } | sed 's|.*refs/tags/||' \
+    { timeout 60 git ls-remote --tags --refs "$1" 2>/dev/null || true; } | sed 's|.*refs/tags/||' \
         | { grep -E "^${pre}v?[0-9]+(\.[0-9]+)+\$" || true; } | sed -E "s/^${pre}v?//" | sort -V | tail -n1
 }
 resolve() {   # $1 = nazwa zmiennej, $2 = opis źródła, reszta = polecenie wypisujące wersję
@@ -83,10 +84,22 @@ libvpl_latest() {
         | { grep -E '^v2\.[0-9]+\.[0-9]+$' || true; } | sed 's/^v//' | sort -V | tail -n1
 }
 resolve LIBVPL_REF "github.com/intel/libvpl" libvpl_latest
-# MKVToolNix: tagi "release-X.Y" w repozytorium projektu (Codeberg; zapasowo GitLab).
+# MKVToolNix — kilka źródeł po kolei, bo pojedyncze bywają niedostępne:
+# plik sprawdzania aktualizacji z mkvtoolnix.download, tagi "release-X.Y" (Codeberg, GitLab),
+# lista wydań dla Windows, a na końcu wersja już pobrana do cache.
 mkvtoolnix_latest() {
-    local v; v="$(latest_git_tag https://codeberg.org/mbunkus/mkvtoolnix.git release-)"
+    local v=""
+    v="$({ wget -qO- --timeout=20 https://mkvtoolnix.download/latest-release.xml.gz || true; } \
+        | { gzip -dc 2>/dev/null || true; } | { grep -oE '<version>[0-9]+\.[0-9]+(\.[0-9]+)?</version>' || true; } \
+        | sed -E 's|</?version>||g' | sort -V | tail -n1)"
+    [[ -n "$v" ]] || v="$(latest_git_tag https://codeberg.org/mbunkus/mkvtoolnix.git release-)"
     [[ -n "$v" ]] || v="$(latest_git_tag https://gitlab.com/mbunkus/mkvtoolnix.git release-)"
+    [[ -n "$v" ]] || v="$({ wget -qO- --timeout=20 https://mkvtoolnix.download/windows/releases/ || true; } \
+        | { grep -oE 'href="[0-9]+\.[0-9]+(\.[0-9]+)?/"' || true; } | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | sort -uV | tail -n1)"
+    if [[ -z "$v" ]]; then
+        v="$(ls -1d "$CACHE"/mkvtoolnix-* 2>/dev/null | sed 's|.*/mkvtoolnix-||' | sort -V | tail -n1)"
+        [[ -n "$v" ]] && echo "UWAGA: źródła wersji MKVToolNix niedostępne — używam pobranej wcześniej $v" >&2
+    fi
     echo "$v"
 }
 resolve MKVTOOLNIX_VERSION "tagi release-* MKVToolNix" mkvtoolnix_latest
