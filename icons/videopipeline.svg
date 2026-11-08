@@ -1,65 +1,106 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
   <title>VideoPipeline</title>
   <defs>
-    <linearGradient id="metal" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#e4e8eb"/><stop offset=".3" stop-color="#959ca4"/>
-      <stop offset=".7" stop-color="#555c64"/><stop offset="1" stop-color="#858d95"/>
+    <!-- stal: poziome pasy jak w chromowanym odlewie -->
+    <linearGradient id="steelV" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f4f6f8"/><stop offset=".18" stop-color="#c4cad0"/>
+      <stop offset=".45" stop-color="#7c848d"/><stop offset=".7" stop-color="#4c535b"/>
+      <stop offset=".88" stop-color="#7f8790"/><stop offset="1" stop-color="#b9c0c7"/>
     </linearGradient>
-    <linearGradient id="metalH" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#5f666e"/><stop offset=".3" stop-color="#d9dde1"/>
-      <stop offset=".55" stop-color="#9aa1a9"/><stop offset="1" stop-color="#4f555c"/>
+    <linearGradient id="steelH" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#454b52"/><stop offset=".18" stop-color="#9aa1a9"/>
+      <stop offset=".38" stop-color="#f1f3f5"/><stop offset=".55" stop-color="#b3bac1"/>
+      <stop offset=".8" stop-color="#6a727b"/><stop offset="1" stop-color="#3c4248"/>
     </linearGradient>
-    <radialGradient id="ball" cx=".35" cy=".3" r=".75">
-      <stop offset="0" stop-color="#ffffff"/><stop offset=".4" stop-color="#a7aeb6"/><stop offset="1" stop-color="#454b52"/>
+    <linearGradient id="pillarL" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#5b626a"/><stop offset=".3" stop-color="#d6dbe0"/>
+      <stop offset=".6" stop-color="#8d959d"/><stop offset="1" stop-color="#454b52"/>
+    </linearGradient>
+    <linearGradient id="pillarR" x1="1" y1="0" x2="0" y2="0">
+      <stop offset="0" stop-color="#4a5057"/><stop offset=".3" stop-color="#b9c0c7"/>
+      <stop offset=".6" stop-color="#7d858e"/><stop offset="1" stop-color="#3f454c"/>
+    </linearGradient>
+    <radialGradient id="ball" cx=".36" cy=".32" r=".72">
+      <stop offset="0" stop-color="#ffffff"/><stop offset=".25" stop-color="#d9dde1"/>
+      <stop offset=".65" stop-color="#7a828b"/><stop offset="1" stop-color="#363b41"/>
     </radialGradient>
     <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#2f7fd0"/><stop offset=".6" stop-color="#9fd0f2"/><stop offset="1" stop-color="#fff2c6"/>
+      <stop offset="0" stop-color="#1f6fc4"/><stop offset=".55" stop-color="#8cc6ef"/><stop offset="1" stop-color="#fdf0c4"/>
     </linearGradient>
-    <radialGradient id="sun" cx="186" cy="146" r="34" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#fffbe8"/><stop offset=".25" stop-color="#ffe27a"/>
-      <stop offset=".6" stop-color="#ffc94a" stop-opacity=".5"/><stop offset="1" stop-color="#ffc94a" stop-opacity="0"/>
+    <radialGradient id="sun" cx="190" cy="146" r="40" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/><stop offset=".15" stop-color="#fff3b0"/>
+      <stop offset=".4" stop-color="#ffd24d" stop-opacity=".75"/><stop offset="1" stop-color="#ffb93a" stop-opacity="0"/>
     </radialGradient>
-    <linearGradient id="lake" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#7cc4e8"/><stop offset="1" stop-color="#2b6fa8"/>
+    <linearGradient id="mtnFar" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7fa7c9"/><stop offset="1" stop-color="#9cc3a8"/>
     </linearGradient>
-    <clipPath id="picclip"><path d="M50,119 Q128,134 206,119 Q221,155 206,191 Q128,177 50,191 Q35,155 50,119 Z"/></clipPath>
+    <linearGradient id="mtn" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4c9a52"/><stop offset="1" stop-color="#2d6e35"/>
+    </linearGradient>
+    <linearGradient id="lake" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9ad6f2"/><stop offset="1" stop-color="#2a6ea8"/>
+    </linearGradient>
+    <linearGradient id="filmG" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2b2e33"/><stop offset=".5" stop-color="#0d0e10"/><stop offset="1" stop-color="#25282c"/>
+    </linearGradient>
+    <clipPath id="picclip"><path d="M56,122 Q128,140 200,122 Q215,156 200,190 Q128,172 56,190 Q41,156 56,122 Z"/></clipPath>
   </defs>
-  <!-- trzpień: rączka z kulkami -->
-  <rect x="44" y="12" width="168" height="15" rx="7.5" fill="url(#metal)" stroke="#3b4148" stroke-width="2"/>
-  <circle cx="44" cy="19.5" r="13" fill="url(#ball)" stroke="#3b4148" stroke-width="2"/>
-  <circle cx="212" cy="19.5" r="13" fill="url(#ball)" stroke="#3b4148" stroke-width="2"/>
-  <rect x="106" y="4" width="44" height="38" rx="8" fill="url(#metalH)" stroke="#3b4148" stroke-width="2.2"/>
-  <!-- rama imadła (ramka z otworem) -->
-  <path fill-rule="evenodd" fill="url(#metal)" stroke="#353b42" stroke-width="2.6"
-        d="M32,48 H224 A22,22 0 0 1 246,70 V222 A20,20 0 0 1 226,242 H30 A20,20 0 0 1 10,222 V70 A22,22 0 0 1 32,48 Z
-           M36,82 V210 H220 V82 Z"/>
+
+  <!-- rączka trzpienia -->
+  <rect x="42" y="9" width="172" height="18" rx="9" fill="url(#steelV)" stroke="#2e3338" stroke-width="2.4"/>
+  <rect x="50" y="12" width="156" height="3.5" rx="1.75" fill="#ffffff" opacity=".7"/>
+  <circle cx="44" cy="18" r="15.5" fill="url(#ball)" stroke="#2e3338" stroke-width="2.4"/>
+  <circle cx="212" cy="18" r="15.5" fill="url(#ball)" stroke="#2e3338" stroke-width="2.4"/>
+  <ellipse cx="39" cy="12" rx="5" ry="3.2" fill="#fff" opacity=".9"/>
+  <ellipse cx="207" cy="12" rx="5" ry="3.2" fill="#fff" opacity=".9"/>
+
+  <!-- rama imadła: górna belka, słupki, podstawa -->
+  <path fill="url(#steelV)" stroke="#2e3338" stroke-width="2.8"
+        d="M30,50 H226 Q250,50 250,74 V96 H6 V74 Q6,50 30,50 Z"/>
+  <rect x="14" y="56" width="228" height="5" rx="2.5" fill="#fff" opacity=".75"/>
+  <rect x="6" y="90" width="36" height="128" fill="url(#pillarL)" stroke="#2e3338" stroke-width="2.6"/>
+  <rect x="214" y="90" width="36" height="128" fill="url(#pillarR)" stroke="#2e3338" stroke-width="2.6"/>
+  <rect x="14" y="98" width="5" height="112" rx="2.5" fill="#fff" opacity=".55"/>
+  <rect x="222" y="98" width="4" height="112" rx="2" fill="#fff" opacity=".35"/>
+  <!-- wnętrze -->
+  <rect x="42" y="96" width="172" height="122" fill="#24292e"/>
+  <rect x="42" y="96" width="172" height="8" fill="#14171a" opacity=".6"/>
   <!-- podstawa -->
-  <rect x="6" y="214" width="244" height="34" rx="12" fill="url(#metal)" stroke="#353b42" stroke-width="2.6"/>
-  <rect x="14" y="218" width="228" height="5" rx="2.5" fill="#ffffff" opacity=".45"/>
-  <rect x="20" y="54" width="216" height="6" rx="3" fill="#ffffff" opacity=".5"/>
-  <!-- otwór -->
-  <rect x="36" y="82" width="184" height="128" fill="#2a2f35"/>
+  <path fill="url(#steelV)" stroke="#2e3338" stroke-width="2.8"
+        d="M6,212 H250 V230 Q250,250 230,250 H26 Q6,250 6,230 Z"/>
+  <rect x="14" y="216" width="228" height="5" rx="2.5" fill="#fff" opacity=".7"/>
+
+  <!-- nakrętka i gwint (przed belką) -->
+  <rect x="104" y="2" width="48" height="44" rx="9" fill="url(#steelH)" stroke="#2e3338" stroke-width="2.6"/>
+  <rect x="104" y="20" width="48" height="5" fill="#2e3338" opacity=".35"/>
+  <rect x="112" y="40" width="32" height="54" fill="url(#steelH)" stroke="#2e3338" stroke-width="2.4"/>
+  <path d="M112,44 Q128,39 144,41" stroke="#2c3137" stroke-width="3.2" fill="none" stroke-linecap="round"/><path d="M113,41.5 Q128,36.5 143,38.5" stroke="#f2f4f6" stroke-width="1.6" fill="none" stroke-linecap="round" opacity=".85"/><path d="M112,50 Q128,45 144,47" stroke="#2c3137" stroke-width="3.2" fill="none" stroke-linecap="round"/><path d="M113,47.5 Q128,42.5 143,44.5" stroke="#f2f4f6" stroke-width="1.6" fill="none" stroke-linecap="round" opacity=".85"/><path d="M112,56 Q128,51 144,53" stroke="#2c3137" stroke-width="3.2" fill="none" stroke-linecap="round"/><path d="M113,53.5 Q128,48.5 143,50.5" stroke="#f2f4f6" stroke-width="1.6" fill="none" stroke-linecap="round" opacity=".85"/><path d="M112,62 Q128,57 144,59" stroke="#2c3137" stroke-width="3.2" fill="none" stroke-linecap="round"/><path d="M113,59.5 Q128,54.5 143,56.5" stroke="#f2f4f6" stroke-width="1.6" fill="none" stroke-linecap="round" opacity=".85"/><path d="M112,68 Q128,63 144,65" stroke="#2c3137" stroke-width="3.2" fill="none" stroke-linecap="round"/><path d="M113,65.5 Q128,60.5 143,62.5" stroke="#f2f4f6" stroke-width="1.6" fill="none" stroke-linecap="round" opacity=".85"/><path d="M112,74 Q128,69 144,71" stroke="#2c3137" stroke-width="3.2" fill="none" stroke-linecap="round"/><path d="M113,71.5 Q128,66.5 143,68.5" stroke="#f2f4f6" stroke-width="1.6" fill="none" stroke-linecap="round" opacity=".85"/><path d="M112,80 Q128,75 144,77" stroke="#2c3137" stroke-width="3.2" fill="none" stroke-linecap="round"/><path d="M113,77.5 Q128,72.5 143,74.5" stroke="#f2f4f6" stroke-width="1.6" fill="none" stroke-linecap="round" opacity=".85"/><path d="M112,86 Q128,81 144,83" stroke="#2c3137" stroke-width="3.2" fill="none" stroke-linecap="round"/><path d="M113,83.5 Q128,78.5 143,80.5" stroke="#f2f4f6" stroke-width="1.6" fill="none" stroke-linecap="round" opacity=".85"/><path d="M112,92 Q128,87 144,89" stroke="#2c3137" stroke-width="3.2" fill="none" stroke-linecap="round"/><path d="M113,89.5 Q128,84.5 143,86.5" stroke="#f2f4f6" stroke-width="1.6" fill="none" stroke-linecap="round" opacity=".85"/>
   <!-- płyta dociskowa -->
-  <rect x="40" y="86" width="176" height="11" rx="3" fill="url(#metal)" stroke="#353b42" stroke-width="2"/>
-  <!-- gwint (przed górną belką ramy) -->
-  <rect x="113" y="36" width="30" height="52" fill="url(#metalH)" stroke="#3b4148" stroke-width="2"/>
-  <g stroke="#3a4047" stroke-width="2.6" stroke-linecap="round" fill="none"><path d="M115,42 L141,45" /><path d="M115,47 L141,50" /><path d="M115,52 L141,55" /><path d="M115,57 L141,60" /><path d="M115,62 L141,65" /><path d="M115,67 L141,70" /><path d="M115,72 L141,75" /><path d="M115,77 L141,80" /></g>
-  <rect x="104" y="80" width="48" height="10" rx="3" fill="url(#metalH)" stroke="#3b4148" stroke-width="2"/>
-  <!-- klatka filmu ściśnięta w imadle -->
-  <path d="M44,104 Q128,120 212,104 Q230,155 212,206 Q128,190 44,206 Q26,155 44,104 Z" fill="#15171a" stroke="#000" stroke-width="1.5"/>
-  <g fill="#f4f4f4"><rect x="47.4" y="109.1" width="7.2" height="6.4" rx="1.4"/><rect x="47.4" y="194.5" width="7.2" height="6.4" rx="1.4"/><rect x="61.4" y="111.3" width="7.2" height="6.4" rx="1.4"/><rect x="61.4" y="192.3" width="7.2" height="6.4" rx="1.4"/><rect x="75.4" y="113.1" width="7.2" height="6.4" rx="1.4"/><rect x="75.4" y="190.5" width="7.2" height="6.4" rx="1.4"/><rect x="89.4" y="114.4" width="7.2" height="6.4" rx="1.4"/><rect x="89.4" y="189.2" width="7.2" height="6.4" rx="1.4"/><rect x="103.4" y="115.3" width="7.2" height="6.4" rx="1.4"/><rect x="103.4" y="188.3" width="7.2" height="6.4" rx="1.4"/><rect x="117.4" y="115.7" width="7.2" height="6.4" rx="1.4"/><rect x="117.4" y="187.9" width="7.2" height="6.4" rx="1.4"/><rect x="131.4" y="115.7" width="7.2" height="6.4" rx="1.4"/><rect x="131.4" y="187.9" width="7.2" height="6.4" rx="1.4"/><rect x="145.4" y="115.3" width="7.2" height="6.4" rx="1.4"/><rect x="145.4" y="188.3" width="7.2" height="6.4" rx="1.4"/><rect x="159.4" y="114.4" width="7.2" height="6.4" rx="1.4"/><rect x="159.4" y="189.2" width="7.2" height="6.4" rx="1.4"/><rect x="173.4" y="113.1" width="7.2" height="6.4" rx="1.4"/><rect x="173.4" y="190.5" width="7.2" height="6.4" rx="1.4"/><rect x="187.4" y="111.3" width="7.2" height="6.4" rx="1.4"/><rect x="187.4" y="192.3" width="7.2" height="6.4" rx="1.4"/><rect x="201.4" y="109.1" width="7.2" height="6.4" rx="1.4"/><rect x="201.4" y="194.5" width="7.2" height="6.4" rx="1.4"/></g>
+  <path d="M98,92 H158 Q162,92 162,96 V104 H94 V96 Q94,92 98,92 Z" fill="url(#steelV)" stroke="#2e3338" stroke-width="2.2"/>
+
+  <!-- ściśnięta klatka filmu -->
+  <path d="M48,102 Q128,124 208,102 Q226,156 208,210 Q128,188 48,210 Q30,156 48,102 Z" fill="url(#filmG)" stroke="#000" stroke-width="1.8"/>
+  <g fill="#f7f7f7"><rect x="51.3" y="109.4" width="6.8" height="6.8" rx="1.3"/><rect x="51.3" y="195.8" width="6.8" height="6.8" rx="1.3"/><rect x="64.6" y="112.4" width="6.8" height="6.8" rx="1.3"/><rect x="64.6" y="192.8" width="6.8" height="6.8" rx="1.3"/><rect x="77.9" y="114.9" width="6.8" height="6.8" rx="1.3"/><rect x="77.9" y="190.3" width="6.8" height="6.8" rx="1.3"/><rect x="91.3" y="116.7" width="6.8" height="6.8" rx="1.3"/><rect x="91.3" y="188.5" width="6.8" height="6.8" rx="1.3"/><rect x="104.6" y="117.9" width="6.8" height="6.8" rx="1.3"/><rect x="104.6" y="187.3" width="6.8" height="6.8" rx="1.3"/><rect x="117.9" y="118.5" width="6.8" height="6.8" rx="1.3"/><rect x="117.9" y="186.7" width="6.8" height="6.8" rx="1.3"/><rect x="131.3" y="118.5" width="6.8" height="6.8" rx="1.3"/><rect x="131.3" y="186.7" width="6.8" height="6.8" rx="1.3"/><rect x="144.6" y="117.9" width="6.8" height="6.8" rx="1.3"/><rect x="144.6" y="187.3" width="6.8" height="6.8" rx="1.3"/><rect x="157.9" y="116.7" width="6.8" height="6.8" rx="1.3"/><rect x="157.9" y="188.5" width="6.8" height="6.8" rx="1.3"/><rect x="171.3" y="114.9" width="6.8" height="6.8" rx="1.3"/><rect x="171.3" y="190.3" width="6.8" height="6.8" rx="1.3"/><rect x="184.6" y="112.4" width="6.8" height="6.8" rx="1.3"/><rect x="184.6" y="192.8" width="6.8" height="6.8" rx="1.3"/><rect x="197.9" y="109.4" width="6.8" height="6.8" rx="1.3"/><rect x="197.9" y="195.8" width="6.8" height="6.8" rx="1.3"/></g>
   <g clip-path="url(#picclip)">
-    <rect x="30" y="110" width="200" height="90" fill="url(#sky)"/>
-    <circle cx="186" cy="146" r="34" fill="url(#sun)"/>
-    <path d="M30,170 L72,140 L92,150 L122,124 L152,152 L170,146 L200,168 L230,172 V200 H30 Z" fill="#3f8a4a"/>
-    <path d="M122,124 L135,135 L128,135 L141,149 L111,149 Z" fill="#6fae72" opacity=".7"/>
-    <path d="M30,168 Q90,152 130,166 T230,170 V200 H30 Z" fill="#5ea44c"/>
-    <rect x="30" y="172" width="200" height="8" fill="url(#lake)"/>
-    <path d="M30,180 Q100,174 150,181 T230,179 V200 H30 Z" fill="#2f6f2f"/>
-    <g fill="#1f5226">
-      <path d="M56,181 l5,-15 l5,15 z"/><path d="M64,182 l4,-12 l4,12 z"/>
-      <path d="M182,180 l5,-16 l5,16 z"/><path d="M191,181 l4,-12 l4,12 z"/><path d="M173,181 l4,-11 l4,11 z"/>
+    <rect x="28" y="110" width="200" height="90" fill="url(#sky)"/>
+    <circle cx="190" cy="146" r="40" fill="url(#sun)"/>
+    <g stroke="#fff6c9" stroke-width="1.4" opacity=".7">
+      <path d="M190,146 L222,128"/><path d="M190,146 L226,150"/><path d="M190,146 L214,118"/><path d="M190,146 L170,118"/>
+    </g>
+    <path d="M28,160 L60,134 L80,146 L104,128 L128,148 L152,136 L178,154 L228,150 V200 H28 Z" fill="url(#mtnFar)" opacity=".85"/>
+    <path d="M28,170 L66,140 L84,152 L118,122 L150,154 L168,148 L196,166 L228,170 V200 H28 Z" fill="url(#mtn)"/>
+    <path d="M118,122 L130,133 L124,133 L136,146 L108,146 L114,136 Z" fill="#8cc58c" opacity=".75"/>
+    <path d="M66,140 L74,147 L70,147 L78,154 L58,154 Z" fill="#7fbd80" opacity=".6"/>
+    <path d="M28,170 Q80,156 128,168 T228,172 V200 H28 Z" fill="#68b14e"/>
+    <path d="M28,174 Q128,168 228,176 V186 H28 Z" fill="url(#lake)"/>
+    <path d="M60,178 H120 M140,180 H200" stroke="#e8f7ff" stroke-width="1" opacity=".7"/>
+    <path d="M28,184 Q100,178 150,185 T228,183 V200 H28 Z" fill="#2f7a32"/>
+    <g fill="#1d5225">
+      <path d="M52,185 l6,-19 l6,19 z"/><path d="M61,186 l5,-15 l5,15 z"/><path d="M45,186 l4,-12 l4,12 z"/>
+      <path d="M184,184 l6,-20 l6,20 z"/><path d="M193,185 l5,-15 l5,15 z"/><path d="M175,185 l4,-13 l4,13 z"/><path d="M201,186 l4,-11 l4,11 z"/>
     </g>
   </g>
-  <path d="M50,119 Q128,134 206,119 Q221,155 206,191 Q128,177 50,191 Q35,155 50,119 Z" fill="none" stroke="#0c0d0f" stroke-width="1.2"/>
+  <path d="M56,122 Q128,140 200,122 Q215,156 200,190 Q128,172 56,190 Q41,156 56,122 Z" fill="none" stroke="#050506" stroke-width="1.4"/>
+  <!-- odblask na kliszy -->
+  <path d="M54,106 Q128,126 202,106" stroke="#ffffff" stroke-width="1.2" fill="none" opacity=".35"/>
 </svg>
