@@ -18,7 +18,7 @@ install -m 755 "$LIB" "$PREFIX/bin/libvideopipeline_core.so"
 
 # Ikona: SVG (skalowalna) + PNG 48/64/128/256.
 install -m 644 icons/videopipeline.svg "$ICONS/scalable/apps/videopipeline.svg"
-for n in 48 64 128 256; do
+for n in 32 48 64 128 256; do
   mkdir -p "$ICONS/${n}x${n}/apps"
   install -m 644 "icons/videopipeline-$n.png" "$ICONS/${n}x${n}/apps/videopipeline.png"
 done

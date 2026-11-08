@@ -48,7 +48,7 @@ sed 's|^Exec=.*|Exec=videopipeline|' packaging/appimage/videopipeline.desktop \
     > "$PKG/usr/share/applications/videopipeline.desktop"
 chmod 644 "$PKG/usr/share/applications/videopipeline.desktop"
 install -m644 icons/videopipeline.svg "$PKG/usr/share/icons/hicolor/scalable/apps/videopipeline.svg"
-for sz in 48 64 128 256; do
+for sz in 32 48 64 128 256; do
     d="$PKG/usr/share/icons/hicolor/${sz}x${sz}/apps"
     mkdir -p "$d"
     install -m644 "icons/videopipeline-$sz.png" "$d/videopipeline.png"
