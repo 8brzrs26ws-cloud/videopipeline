@@ -14,7 +14,14 @@ use videopipeline_core::{
 };
 use anyhow::Result;
 use ratatui::{
-    crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
+    crossterm::{
+        event::{
+            self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
+            MouseButton, MouseEvent, MouseEventKind,
+        },
+        execute,
+    },
+    layout::Rect,
     DefaultTerminal,
 };
 use std::{
@@ -43,6 +50,31 @@ pub enum Mode {
     ConfirmDelete,
     /// F4: zmiana nazwy
     Rename,
+    /// F2: informacje MediaInfo o pliku
+    MediaInfo,
+}
+
+/// Okienko F2: raport MediaInfo (albo błąd) i przewinięcie.
+pub struct MediaInfoView {
+    pub file: String,
+    pub report: Result<Vec<videopipeline_core::mediainfo::Section>, String>,
+    pub scroll: usize,
+    /// Ustawiane przy rysowaniu: maksymalne przewinięcie.
+    pub max_scroll: usize,
+}
+
+/// Położenie elementów na ekranie z ostatniego rysowania (dla myszy).
+#[derive(Default, Clone, Copy)]
+pub struct UiRects {
+    pub left_list: Rect,
+    pub right_list: Rect,
+    pub fkeys: Rect,
+}
+
+/// Przewijanie długiej nazwy zaznaczonej pozycji: (klucz pozycji, od kiedy zaznaczona).
+pub struct Marquee {
+    pub key: String,
+    pub since: Instant,
 }
 
 /// Pole tekstowe z kursorem (zmiana nazwy).
@@ -133,6 +165,14 @@ pub struct App {
     pub pending_delete: Vec<PathBuf>,
     /// F4: trwająca zmiana nazwy
     pub rename: Option<RenameCtx>,
+    /// F2: okienko MediaInfo
+    pub mediainfo: Option<MediaInfoView>,
+    /// Ostatni układ ekranu (obsługa myszy)
+    pub ui: UiRects,
+    /// Ostatnie kliknięcie: panel, wiersz, czas — do wykrywania podwójnego kliknięcia
+    last_click: Option<(Focus, usize, Instant)>,
+    /// Przewijanie długiej nazwy zaznaczonego pliku
+    pub marquee: Marquee,
 }
 
 impl App {
@@ -156,6 +196,10 @@ impl App {
             monitor: None,
             pending_delete: vec![],
             rename: None,
+            mediainfo: None,
+            ui: UiRects::default(),
+            last_click: None,
+            marquee: Marquee { key: String::new(), since: Instant::now() },
         };
         if !initial.is_empty() {
             app.add_paths(initial);
@@ -353,6 +397,7 @@ impl App {
             Mode::ConfirmQuit => self.key_confirm(k, true),
             Mode::ConfirmDelete => self.key_confirm_delete(k),
             Mode::Rename => self.key_rename(k),
+            Mode::MediaInfo => self.key_mediainfo(k),
             Mode::Finished => {
                 if self.shutdown_at.is_some() {
                     self.shutdown_at = None;
@@ -419,6 +464,7 @@ impl App {
             },
             KeyCode::Char(c @ ('+' | '-' | '*')) => self.marks(c),
             KeyCode::F(1) => self.mode = Mode::Help,
+            KeyCode::F(2) => self.begin_mediainfo(),
             KeyCode::F(4) => self.begin_rename(),
             KeyCode::F(5) => self.add_from_left(),
             KeyCode::F(6) => self.begin_delete(),
@@ -429,6 +475,144 @@ impl App {
             }
             KeyCode::F(9) => self.start_run(),
             KeyCode::F(10) => self.request_quit(),
+            _ => {}
+        }
+    }
+
+    /// Czy zaznaczona nazwa jest właśnie przewijana (ustawiane przy rysowaniu).
+    pub fn marquee_active(&self) -> bool {
+        !self.marquee.key.is_empty()
+    }
+
+    // ------------------------------------------------------------ MediaInfo (F2) ---
+
+    /// F2: informacje o bieżącym pliku (lewy panel) albo pozycji kolejki (prawy panel).
+    fn begin_mediainfo(&mut self) {
+        let path = match self.focus {
+            Focus::Left => self.browser.selected().filter(|e| !e.is_dir && !e.is_up).map(|e| e.path.clone()),
+            Focus::Right => self.queue.state.selected().and_then(|i| self.queue.items.get(i)).map(|q| q.path.clone()),
+        };
+        let Some(path) = path else {
+            self.status_msg = "F2 pokazuje informacje o pliku — wybierz plik (nie katalog)".into();
+            return;
+        };
+        let file = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        let report = videopipeline_core::mediainfo::easy(&path);
+        self.mediainfo = Some(MediaInfoView { file, report, scroll: 0, max_scroll: 0 });
+        self.mode = Mode::MediaInfo;
+    }
+
+    fn key_mediainfo(&mut self, k: KeyEvent) {
+        let Some(v) = self.mediainfo.as_mut() else {
+            self.mode = Mode::Normal;
+            return;
+        };
+        match k.code {
+            KeyCode::Esc | KeyCode::F(2) | KeyCode::F(10) | KeyCode::Enter | KeyCode::Char('q') => {
+                self.mediainfo = None;
+                self.mode = Mode::Normal;
+            }
+            KeyCode::Up => v.scroll = v.scroll.saturating_sub(1),
+            KeyCode::Down => v.scroll = (v.scroll + 1).min(v.max_scroll),
+            KeyCode::PageUp => v.scroll = v.scroll.saturating_sub(10),
+            KeyCode::PageDown => v.scroll = (v.scroll + 10).min(v.max_scroll),
+            KeyCode::Home => v.scroll = 0,
+            KeyCode::End => v.scroll = v.max_scroll,
+            _ => {}
+        }
+    }
+
+    // ------------------------------------------------------------------- mysz ---
+
+    /// Kliknięcie: ustawia kursor i zaznacza/odznacza plik; podwójne kliknięcie na pliku dodaje zaznaczone + kliknięty do kolejki,
+    /// na katalogu — wchodzi do niego. Prawy przycisk: MediaInfo. Kółko: przewijanie. Pasek F1–F10: klawisze.
+    pub fn on_mouse(&mut self, m: MouseEvent) {
+        let inside = |r: Rect| m.column >= r.x && m.column < r.x + r.width && m.row >= r.y && m.row < r.y + r.height;
+        match self.mode {
+            Mode::MediaInfo => {
+                if let Some(v) = self.mediainfo.as_mut() {
+                    match m.kind {
+                        MouseEventKind::ScrollDown => v.scroll = (v.scroll + 3).min(v.max_scroll),
+                        MouseEventKind::ScrollUp => v.scroll = v.scroll.saturating_sub(3),
+                        MouseEventKind::Down(_) => {
+                            self.mediainfo = None;
+                            self.mode = Mode::Normal;
+                        }
+                        _ => {}
+                    }
+                }
+                return;
+            }
+            Mode::Normal => {}
+            _ => return,
+        }
+        let ui = self.ui;
+        // Pasek klawiszy funkcyjnych.
+        if let MouseEventKind::Down(MouseButton::Left) = m.kind {
+            if inside(ui.fkeys) && ui.fkeys.width >= 10 {
+                let cell = (ui.fkeys.width / 10).max(1);
+                let n = ((m.column - ui.fkeys.x) / cell).min(9) as u8 + 1;
+                self.on_key(KeyEvent::new(KeyCode::F(n), KeyModifiers::NONE));
+                return;
+            }
+        }
+        let (panel, list) = if inside(ui.left_list) {
+            (Focus::Left, ui.left_list)
+        } else if inside(ui.right_list) {
+            (Focus::Right, ui.right_list)
+        } else {
+            return;
+        };
+        match m.kind {
+            MouseEventKind::ScrollDown | MouseEventKind::ScrollUp => {
+                let d = if m.kind == MouseEventKind::ScrollDown { 3 } else { -3 };
+                self.focus = panel;
+                self.move_cursor(d);
+            }
+            MouseEventKind::Down(button) => {
+                self.status_msg.clear();
+                self.focus = panel;
+                let row = (m.row - list.y) as usize;
+                let (offset, len) = match panel {
+                    Focus::Left => (self.browser.state.offset(), self.browser.entries.len()),
+                    Focus::Right => (self.queue.state.offset(), self.queue.items.len()),
+                };
+                let idx = offset + row;
+                if idx >= len {
+                    return;
+                }
+                match panel {
+                    Focus::Left => self.browser.state.select(Some(idx)),
+                    Focus::Right => self.queue.state.select(Some(idx)),
+                }
+                if button == MouseButton::Right {
+                    self.begin_mediainfo();
+                    return;
+                }
+                if button != MouseButton::Left {
+                    return;
+                }
+                let now = Instant::now();
+                let double = matches!(self.last_click,
+                    Some((p, i, t)) if p == panel && i == idx && now.duration_since(t) < Duration::from_millis(450));
+                self.last_click = if double { None } else { Some((panel, idx, now)) };
+                // Pojedyncze kliknięcie na pliku w lewym panelu zaznacza go / odznacza (jak Spacja).
+                if !double && panel == Focus::Left && self.browser.selected().is_some_and(|e| !e.is_dir && !e.is_up) {
+                    self.browser.toggle_mark_here();
+                }
+                if double && panel == Focus::Left {
+                    let (is_file, path) = match self.browser.selected() {
+                        Some(e) => (!e.is_dir && !e.is_up, e.path.clone()),
+                        None => return,
+                    };
+                    if is_file {
+                        self.browser.marked.insert(path); // zaznaczone + kliknięty
+                        self.add_from_left();
+                    } else if let Some(p) = self.browser.activate() {
+                        self.add_paths(vec![p]);
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -680,7 +864,10 @@ fn expand_home(s: &str) -> PathBuf {
 
 pub fn run(app: &mut App) -> Result<()> {
     let mut terminal = ratatui::init();
+    // Mysz: kliknięcia i kółko. (Zaznaczanie tekstu w terminalu działa wtedy z wciśniętym Shift.)
+    let _ = execute!(std::io::stdout(), EnableMouseCapture);
     let res = event_loop(&mut terminal, app);
+    let _ = execute!(std::io::stdout(), DisableMouseCapture);
     ratatui::restore();
     proc::kill_all();
     res
@@ -692,11 +879,13 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
         app.poll_run();
         terminal.draw(|f| render::draw(f, app))?;
 
-        if event::poll(Duration::from_millis(200))? {
-            if let Event::Key(k) = event::read()? {
-                if k.kind == KeyEventKind::Press {
-                    app.on_key(k);
-                }
+        // Krótszy odstęp, gdy przewija się długa nazwa (płynniejszy ruch tekstu).
+        let wait = if app.marquee_active() { 120 } else { 200 };
+        if event::poll(Duration::from_millis(wait))? {
+            match event::read()? {
+                Event::Key(k) if k.kind == KeyEventKind::Press => app.on_key(k),
+                Event::Mouse(m) => app.on_mouse(m),
+                _ => {}
             }
         }
         if last_tick.elapsed() >= Duration::from_secs(1) {

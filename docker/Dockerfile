@@ -7,7 +7,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential nasm yasm pkg-config clang llvm lld patchelf file wget curl git \
         ca-certificates xz-utils zstd dpkg-dev fakeroot desktop-file-utils squashfs-tools \
-        mkvtoolnix libdav1d-dev zlib1g-dev libmagic-mgc \
+        mkvtoolnix mediainfo libdav1d-dev zlib1g-dev libmagic-mgc \
         libva-dev libdrm-dev libvpl-dev \
         mingw-w64 libz-mingw-w64-dev meson ninja-build cmake 7zip zip libarchive-tools \
     && rm -rf /var/lib/apt/lists/*

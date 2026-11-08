@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Buduje dist/VideoPipeline-<wersja>-x86_64_v3.AppImage z dołączonymi narzędziami:
 #   ffmpeg + ffprobe (NVENC/NVDEC/CUDA-LLVM statycznie; Intel QSV/VAAPI z libva/libvpl linkowanymi dynamicznie),
-#   mkvmerge, dovi_tool, hdr10plus_tool.
+#   mkvmerge, mediainfo, dovi_tool, hdr10plus_tool.
 # Kod własny (videopipeline, biblioteka core, dovi_tool, hdr10plus_tool, ffmpeg) jest kompilowany
 # z -march/-C target-cpu=x86-64-v3. Sterowniki NVIDIA pochodzą z hosta i NIE są dołączane.
 #
@@ -54,7 +54,7 @@ fi
 [[ "$HDR10PLUS_TOOL_REF" = latest ]] && HDR10PLUS_TOOL_REF="$(latest_git_tag https://github.com/quietvoid/hdr10plus_tool)"
 echo "Wersje: ffmpeg $FFMPEG_VERSION, dovi_tool $DOVI_TOOL_REF, hdr10plus_tool $HDR10PLUS_TOOL_REF"
 
-for c in cargo rustc gcc clang make nasm pkg-config git wget patchelf mkvmerge; do need "$c"; done
+for c in cargo rustc gcc clang make nasm pkg-config git wget patchelf mkvmerge mediainfo; do need "$c"; done
 pkg-config --exists dav1d || fail "brak libdav1d-dev (pkg-config dav1d)"
 
 # --------------------------------------------------------------------------- 1. aplikacja
@@ -191,6 +191,7 @@ cp "$STD_SO" "$APPDIR/usr/lib/"
 install -m755 "$FFPREFIX/bin/ffmpeg" "$FFPREFIX/bin/ffprobe" "$APPDIR/usr/bin/"
 install -m755 "$TOOLS/bin/dovi_tool" "$TOOLS/bin/hdr10plus_tool" "$APPDIR/usr/bin/"
 install -m755 "$(command -v mkvmerge)" "$APPDIR/usr/bin/"
+install -m755 "$(command -v mediainfo)" "$APPDIR/usr/bin/"
 for m in /usr/lib/file/magic.mgc /usr/share/misc/magic.mgc; do
     if [[ -f "$m" ]]; then cp -L "$m" "$APPDIR/usr/share/misc/magic.mgc"; break; fi
 done
@@ -237,6 +238,7 @@ export LINUXDEPLOY_OUTPUT_VERSION="$VERSION"
         --appdir "$APPDIR" \
         --executable "$APPDIR/usr/bin/videopipeline" \
         --executable "$APPDIR/usr/bin/mkvmerge" \
+        --executable "$APPDIR/usr/bin/mediainfo" \
         --executable "$APPDIR/usr/bin/ffmpeg" \
         --executable "$APPDIR/usr/bin/ffprobe" \
         --executable "$APPDIR/usr/bin/dovi_tool" \

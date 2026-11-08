@@ -3,11 +3,11 @@
 #   dist/VideoPipeline-<wersja>-windows-x86_64_v3.zip (+ .sha256)
 # Zawartość: videopipeline.exe + videopipeline_core.dll + std-*.dll, ffmpeg.exe i ffprobe.exe
 # (statyczne: NVENC/NVDEC/CUDA-LLVM, Intel QSV przez oneVPL + D3D11, dav1d, zlib), mkvmerge.exe
-# (oficjalna wersja przenośna MKVToolNix), dovi_tool.exe, hdr10plus_tool.exe.
+# (oficjalna wersja przenośna MKVToolNix), MediaInfo.exe (oficjalne CLI MediaArea), dovi_tool.exe, hdr10plus_tool.exe.
 # Sterowniki GPU (NVIDIA, Intel) pochodzą z systemu Windows.
 #
 # Zmienne: VERSION, FFMPEG_VERSION (latest = najnowsze wydanie), DOVI_TOOL_REF, HDR10PLUS_TOOL_REF,
-# DAV1D_REF, LIBVPL_REF, MKVTOOLNIX_VERSION (latest = najnowsze), NVCODEC_HEADERS_REF, TARGET_CPU, JOBS, FORCE=1.
+# DAV1D_REF, LIBVPL_REF, MKVTOOLNIX_VERSION, MEDIAINFO_VERSION (latest = najnowsze), NVCODEC_HEADERS_REF, TARGET_CPU, JOBS, FORCE=1.
 # Uruchamiane przez ./build-local.sh (TARGETS zawiera "windows").
 set -euo pipefail
 
@@ -21,6 +21,7 @@ HDR10PLUS_TOOL_REF="${HDR10PLUS_TOOL_REF:-1.7.2}"
 DAV1D_REF="${DAV1D_REF:-latest}"
 LIBVPL_REF="${LIBVPL_REF:-latest}"
 MKVTOOLNIX_VERSION="${MKVTOOLNIX_VERSION:-latest}"
+MEDIAINFO_VERSION="${MEDIAINFO_VERSION:-latest}"
 NVCODEC_HEADERS_REF="${NVCODEC_HEADERS_REF:-}"
 TARGET_CPU="${TARGET_CPU:-x86-64-v3}"
 JOBS="${JOBS:-$(nproc)}"
@@ -103,7 +104,14 @@ mkvtoolnix_latest() {
     echo "$v"
 }
 resolve MKVTOOLNIX_VERSION "tagi release-* MKVToolNix" mkvtoolnix_latest
-echo "Wersje: ffmpeg $FFMPEG_VERSION, dav1d $DAV1D_REF, libvpl $LIBVPL_REF, MKVToolNix $MKVTOOLNIX_VERSION," \
+# MediaInfo: tagi vRR.MM w repozytorium MediaArea; zapasowo wersja pobrana wcześniej do cache.
+mediainfo_latest() {
+    local v; v="$(latest_git_tag https://github.com/MediaArea/MediaInfo.git)"
+    [[ -n "$v" ]] || v="$(ls -1d "$CACHE"/mediainfo-* 2>/dev/null | sed 's|.*/mediainfo-||' | sort -V | tail -n1)"
+    echo "$v"
+}
+resolve MEDIAINFO_VERSION "github.com/MediaArea/MediaInfo" mediainfo_latest
+echo "Wersje: ffmpeg $FFMPEG_VERSION, dav1d $DAV1D_REF, libvpl $LIBVPL_REF, MKVToolNix $MKVTOOLNIX_VERSION, MediaInfo $MEDIAINFO_VERSION," \
      "dovi_tool $DOVI_TOOL_REF, hdr10plus_tool $HDR10PLUS_TOOL_REF"
 
 export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER="$TRIPLE-gcc"
@@ -248,6 +256,18 @@ if [[ ! -f "$MKV/mkvtoolnix/mkvmerge.exe" ]]; then
     [[ -f "$MKV/mkvtoolnix/mkvmerge.exe" ]] || fail "w archiwum MKVToolNix brak mkvtoolnix/mkvmerge.exe"
 fi
 
+# MediaInfo CLI (oficjalna paczka MediaArea dla Windows x64).
+MI="$CACHE/mediainfo-$MEDIAINFO_VERSION"
+if ! compgen -G "$MI/*.exe" >/dev/null; then
+    ARCHIVE="$WORK/MediaInfo_CLI_${MEDIAINFO_VERSION}_Windows_x64.zip"
+    wget -nv -O "$ARCHIVE" \
+        "https://mediaarea.net/download/binary/mediainfo/$MEDIAINFO_VERSION/MediaInfo_CLI_${MEDIAINFO_VERSION}_Windows_x64.zip" \
+        || fail "nie udało się pobrać MediaInfo CLI $MEDIAINFO_VERSION"
+    rm -rf "$MI" && mkdir -p "$MI"
+    "$SEVENZ" x -y -o"$MI" "$ARCHIVE" >/dev/null
+    compgen -G "$MI/*.exe" >/dev/null || fail "w archiwum MediaInfo CLI brak pliku .exe"
+fi
+
 # ------------------------------------------------------------------ 6. pakiet .zip
 log "6/6 składanie $PKGNAME.zip"
 rm -rf "$PKG" && mkdir -p "$PKG"
@@ -255,6 +275,12 @@ cp "$OUT/videopipeline.exe" "$OUT/videopipeline_core.dll" "$STD_DLL" "$PKG/"
 cp "$FFPREFIX/bin/ffmpeg.exe" "$FFPREFIX/bin/ffprobe.exe" "$PKG/"
 cp "$TOOLS/bin/dovi_tool.exe" "$TOOLS/bin/hdr10plus_tool.exe" "$PKG/"
 cp "$MKV/mkvtoolnix/mkvmerge.exe" "$PKG/"
+# MediaInfo.exe (+ jego biblioteki DLL, jeśli są w paczce CLI); Windows nie rozróżnia wielkości liter,
+# więc program znajduje go jako "mediainfo".
+cp "$MI"/*.exe "$PKG/"
+for d in "$MI"/*.dll "$MI"/*.DLL; do
+    if [[ -f "$d" ]]; then cp "$d" "$PKG/"; fi
+done
 # Dane mkvmerge (baza typów plików itp.), jeśli są w wersji przenośnej.
 [[ -d "$MKV/mkvtoolnix/data" ]] && cp -r "$MKV/mkvtoolnix/data" "$PKG/"
 "$TRIPLE-strip" "$PKG/ffmpeg.exe" "$PKG/ffprobe.exe" "$PKG/dovi_tool.exe" "$PKG/hdr10plus_tool.exe" 2>/dev/null || true

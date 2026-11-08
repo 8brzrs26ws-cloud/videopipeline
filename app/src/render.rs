@@ -157,8 +157,43 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     render_topbar(f, rows[0], &app.opts, app.queue.items.len());
     let cols = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(rows[1]);
     let left_active = app.focus == Focus::Left;
-    render_left(f, cols[0], &mut app.browser, left_active);
-    render_right(f, cols[1], &mut app.queue, &app.snapshot, !left_active, &app.opts);
+
+    // Położenie list (ramka + nagłówek kolumn + stopka) — dla obsługi myszy.
+    let list_rect = |r: Rect| Rect {
+        x: r.x + 1,
+        y: r.y + 2,
+        width: r.width.saturating_sub(2),
+        height: r.height.saturating_sub(4),
+    };
+    app.ui.left_list = list_rect(cols[0]);
+    app.ui.right_list = list_rect(cols[1]);
+    app.ui.fkeys = rows[3];
+
+    // Długa nazwa zaznaczonej pozycji w aktywnym panelu przewija się sama.
+    let panel_w = if left_active { cols[0].width } else { cols[1].width };
+    let name_w = (panel_w as usize).saturating_sub(2).saturating_sub(20).max(4);
+    let sel_label = if left_active {
+        app.browser.selected().map(|e| {
+            if e.is_up {
+                "/..".to_string()
+            } else if e.is_dir {
+                format!("/{}", e.name)
+            } else {
+                e.name.clone()
+            }
+        })
+    } else {
+        app.queue
+            .state
+            .selected()
+            .and_then(|i| app.queue.items.get(i))
+            .map(|q| q.path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default())
+    };
+    let shift = marquee_shift(app, left_active, sel_label, name_w);
+    let (lshift, rshift) = if left_active { (shift, 0) } else { (0, shift) };
+
+    render_left(f, cols[0], &mut app.browser, left_active, lshift);
+    render_right(f, cols[1], &mut app.queue, &app.snapshot, !left_active, &app.opts, rshift);
     render_status(f, rows[2], app);
     render_fkeys(f, rows[3]);
 
@@ -181,6 +216,38 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                 render_rename(f, area, r);
             }
         }
+        Mode::MediaInfo => {
+            if let Some(v) = app.mediainfo.as_mut() {
+                render_mediainfo(f, area, v);
+            }
+        }
+    }
+}
+
+/// Przesunięcie (w znakach) przewijanej nazwy: postój 1 s, przewijanie ~8 znaków/s, postój 1 s, od nowa.
+fn marquee_shift(app: &mut App, left: bool, label: Option<String>, width: usize) -> usize {
+    let Some(label) = label else {
+        app.marquee.key.clear();
+        return 0;
+    };
+    let overflow = label.chars().count().saturating_sub(width);
+    if overflow == 0 {
+        app.marquee.key.clear();
+        return 0;
+    }
+    let key = format!("{}{label}", if left { 'L' } else { 'R' });
+    if app.marquee.key != key {
+        app.marquee.key = key;
+        app.marquee.since = std::time::Instant::now();
+    }
+    const PAUSE: f64 = 1.0;
+    const STEP: f64 = 0.12;
+    let cycle = PAUSE * 2.0 + overflow as f64 * STEP;
+    let t = app.marquee.since.elapsed().as_secs_f64() % cycle;
+    if t < PAUSE {
+        0
+    } else {
+        (((t - PAUSE) / STEP) as usize).min(overflow)
     }
 }
 
@@ -228,7 +295,7 @@ fn render_topbar(f: &mut Frame, area: Rect, o: &Opts, queued: usize) {
     f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
-fn render_left(f: &mut Frame, area: Rect, b: &mut Browser, active: bool) {
+fn render_left(f: &mut Frame, area: Rect, b: &mut Browser, active: bool, shift: usize) {
     let title = tail(&b.cwd.to_string_lossy(), (area.width as usize).saturating_sub(6));
     let block = panel_block(&title, BOX_ALL, active);
     let inner = block.inner(area);
@@ -242,10 +309,12 @@ fn render_left(f: &mut Frame, area: Rect, b: &mut Browser, active: bool) {
     f.render_widget(Paragraph::new(header_line("Nazwa", "Rozmiar", "Zmodyfikowano", name_w)), parts[0]);
     b.page = parts[1].height as usize;
 
+    let sel = b.state.selected();
     let items: Vec<ListItem> = b
         .entries
         .iter()
-        .map(|e| {
+        .enumerate()
+        .map(|(i, e)| {
             let marked = b.marked.contains(&e.path);
             let (label, style) = if e.is_up {
                 ("/..".to_string(), bold(TITLE))
@@ -255,6 +324,7 @@ fn render_left(f: &mut Frame, area: Rect, b: &mut Browser, active: bool) {
                 (e.name.clone(), fg(TEXT))
             };
             let style = if marked { bold(G_MID) } else { style };
+            let label = if Some(i) == sel && shift > 0 { label.chars().skip(shift).collect() } else { label };
             let size = if e.is_up {
                 "UP--DIR".to_string()
             } else if e.is_dir {
@@ -287,7 +357,7 @@ fn render_left(f: &mut Frame, area: Rect, b: &mut Browser, active: bool) {
     f.render_widget(Paragraph::new(Line::from(foot)), parts[2]);
 }
 
-fn render_right(f: &mut Frame, area: Rect, q: &mut Queue, snap: &Snapshot, active: bool, o: &Opts) {
+fn render_right(f: &mut Frame, area: Rect, q: &mut Queue, snap: &Snapshot, active: bool, o: &Opts, shift: usize) {
     let title = format!("Kolejka kodowania ({})", q.items.len());
     let block = panel_block(&title, BOX_ENC, active);
     let inner = block.inner(area);
@@ -310,13 +380,16 @@ fn render_right(f: &mut Frame, area: Rect, q: &mut Queue, snap: &Snapshot, activ
         .alignment(Alignment::Center);
         f.render_widget(hint, parts[1]);
     } else {
+        let sel = q.state.selected();
         let items: Vec<ListItem> = q
             .items
             .iter()
-            .map(|it| {
-                let name = it.path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+            .enumerate()
+            .map(|(i, it)| {
+                let full = it.path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                let name: String = if Some(i) == sel && shift > 0 { full.chars().skip(shift).collect() } else { full.clone() };
                 let marked = q.marked.contains(&it.path);
-                let st = snap.items.get(&name).map(|i| i.state);
+                let st = snap.items.get(&full).map(|i| i.state);
                 let (label, color) = match st {
                     Some(s) => (s.label(), state_color(s)),
                     None => ("", DIM),
@@ -351,7 +424,7 @@ fn render_status(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_fkeys(f: &mut Frame, area: Rect) {
-    let labels = ["Pomoc", "", "", "Nazwa", "Dodaj", "Kasuj", "Opcje", "Z kolejki", "Koduj", "Wyjście"];
+    let labels = ["Pomoc", "Info", "", "Nazwa", "Dodaj", "Kasuj", "Opcje", "Z kolejki", "Koduj", "Wyjście"];
     let total = area.width as usize;
     let cell = total / 10;
     let mut spans: Vec<Span<'static>> = vec![];
@@ -439,7 +512,7 @@ fn render_options(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_help(f: &mut Frame, area: Rect) {
-    let rect = centered(area, 68, 24);
+    let rect = centered(area, 68, 25);
     f.render_widget(Clear, rect);
     let block = dialog_block("Pomoc", BOX_ALL);
     let inner = block.inner(rect);
@@ -459,6 +532,7 @@ fn render_help(f: &mut Frame, area: Rect) {
         k("+  -  *", "zaznacz wszystko / wyczyść / odwróć"),
         k("Enter", "katalog: wejdź · plik: dodaj do kolejki"),
         k("Backspace", "katalog wyżej"),
+        k("F2", "informacje o pliku (MediaInfo); prawy przycisk myszy też"),
         k("F4", "zmień nazwę pliku/katalogu (lewy panel)"),
         k("F5", "dodaj zaznaczone (lub bieżący) do kolejki"),
         k("F6", "usuń zaznaczone pliki z dysku (lewy panel)"),
@@ -531,6 +605,84 @@ fn render_rename(f: &mut Frame, area: Rect, r: &crate::app::RenameCtx) {
         Line::from(Span::styled(" Enter — zapisz · Esc — anuluj · ←→ Home End — kursor", fg(G_MID))),
     ];
     f.render_widget(Paragraph::new(lines), inner);
+}
+
+/// F2: raport MediaInfo w stylu widoku „Easy” — sekcje z jedną linią na strumień, przewijane.
+fn render_mediainfo(f: &mut Frame, area: Rect, v: &mut crate::app::MediaInfoView) {
+    let w = area.width.saturating_sub(4).clamp(40, 110);
+    let inner_w = (w as usize).saturating_sub(4);
+    let mut lines: Vec<Line<'static>> = vec![];
+    match &v.report {
+        Err(e) => {
+            lines.push(Line::from(Span::styled("Nie udało się odczytać informacji:", bold(G_HIGH))));
+            for l in wrap(e, inner_w) {
+                lines.push(Line::from(Span::styled(l, fg(TEXT))));
+            }
+        }
+        Ok(sections) => {
+            for (n, sec) in sections.iter().enumerate() {
+                if n > 0 {
+                    lines.push(Line::default());
+                }
+                let head = format!("─ {} ", sec.title);
+                let fill = inner_w.saturating_sub(head.chars().count());
+                lines.push(Line::from(vec![
+                    Span::styled(head, bold(TITLE)),
+                    Span::styled("─".repeat(fill), fg(BOX_QUEUE)),
+                ]));
+                for l in &sec.lines {
+                    for part in wrap(l, inner_w.saturating_sub(1)) {
+                        lines.push(Line::from(Span::styled(format!(" {part}"), fg(TEXT))));
+                    }
+                }
+            }
+        }
+    }
+    let body_h = lines.len() as u16;
+    let h = (body_h + 4).min(area.height.saturating_sub(2)).max(8);
+    let rect = centered(area, w, h);
+    f.render_widget(Clear, rect);
+    let block = dialog_block(&format!("MediaInfo — {}", trunc(&v.file, (w as usize).saturating_sub(18))), BOX_ALL);
+    let inner = block.inner(rect);
+    f.render_widget(block, rect);
+    let parts = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(inner);
+    let view_h = parts[0].height as usize;
+    v.max_scroll = lines.len().saturating_sub(view_h);
+    v.scroll = v.scroll.min(v.max_scroll);
+    let visible: Vec<Line> = lines.into_iter().skip(v.scroll).take(view_h).collect();
+    f.render_widget(Paragraph::new(visible), parts[0]);
+    let more = if v.max_scroll > 0 { " · ↑↓ PgUp PgDn — przewijanie" } else { "" };
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(format!("Esc / F2 — zamknij{more}"), fg(G_MID)))),
+        parts[1],
+    );
+}
+
+/// Zawijanie tekstu po słowach do szerokości `w` (w znakach).
+fn wrap(s: &str, w: usize) -> Vec<String> {
+    let w = w.max(10);
+    let mut out = vec![];
+    let mut cur = String::new();
+    for word in s.split(' ') {
+        let wl = word.chars().count();
+        let cl = cur.chars().count();
+        if cl > 0 && cl + 1 + wl > w {
+            out.push(std::mem::take(&mut cur));
+        }
+        if !cur.is_empty() {
+            cur.push(' ');
+        }
+        cur.push_str(word);
+        while cur.chars().count() > w {
+            let head: String = cur.chars().take(w).collect();
+            cur = cur.chars().skip(w).collect();
+            out.push(head);
+        }
+    }
+    if !cur.is_empty() || out.is_empty() {
+        out.push(cur);
+    }
+    out
 }
 
 fn render_confirm(f: &mut Frame, area: Rect, text: &str) {

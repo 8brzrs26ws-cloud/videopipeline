@@ -9,6 +9,7 @@
 | libvpl / oneVPL dispatcher (Linux: dynamicznie, Windows: statycznie w ffmpeg.exe) | MIT | https://github.com/intel/libvpl |
 | dav1d (statycznie w ffmpeg) | BSD-2-Clause | https://code.videolan.org/videolan/dav1d |
 | MKVToolNix (mkvmerge) — Linux: z bibliotekami z dystrybucji Debian; Windows: oficjalna wersja przenośna | GPL-2.0 | https://mkvtoolnix.download/source.html |
+| MediaInfo (CLI; Linux: z bibliotekami z dystrybucji Debian, Windows: oficjalne CLI MediaArea) | BSD-2-Clause | https://mediaarea.net/MediaInfo |
 | dovi_tool | MIT | https://github.com/quietvoid/dovi_tool |
 | hdr10plus_tool | MIT | https://github.com/quietvoid/hdr10plus_tool |
 | Biblioteka standardowa Rusta (libstd / std-*.dll) | MIT / Apache-2.0 | https://github.com/rust-lang/rust |

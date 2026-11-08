@@ -32,7 +32,7 @@ Wystarczy jedna karta. Gdy w komputerze są obie, domyślnie koduje NVIDIA, a In
 ## Instalacja
 
 Gotowe pliki są na stronie [Releases](https://github.com/8brzrs26ws-cloud/videopipeline/releases). Każdy wariant zawiera
-własne ffmpeg i ffprobe (NVENC i QSV; na Linuksie także VAAPI), mkvmerge, dovi_tool i hdr10plus_tool; sterowniki GPU
+własne ffmpeg i ffprobe (NVENC i QSV; na Linuksie także VAAPI), mkvmerge, MediaInfo, dovi_tool i hdr10plus_tool; sterowniki GPU
 pochodzą z systemu.
 
 **AppImage** (dowolna dystrybucja spełniająca wymagania):
@@ -73,6 +73,7 @@ po lewej pliki, po prawej kolejkę kodowania.
 | Spacja, Ins | zaznacz / odznacz |
 | Shift+↑↓ / PgUp / PgDn / Home / End | zaznaczanie wielu pozycji |
 | `+` `-` `*` | zaznacz wszystko / wyczyść / odwróć |
+| F2 | informacje o pliku (MediaInfo, w stylu widoku „Easy”): kontener, rozmiar, czas, każdy strumień wideo/audio/napisów w jednej linii; ↑↓ przewijanie, Esc zamyka |
 | F4 | zmień nazwę pliku lub katalogu w lewym panelu (kursor stoi przed rozszerzeniem — wygodne dopisanie np. `_v2`) |
 | F5 | dodaj zaznaczone do kolejki (katalog = wszystkie filmy w nim) |
 | F6 | usuń zaznaczone (lub bieżący) pliki z dysku w lewym panelu — po potwierdzeniu; katalogi nie są usuwane |
@@ -80,6 +81,10 @@ po lewej pliki, po prawej kolejkę kodowania.
 | F8 / Del | wyjmij z kolejki (plik zostaje na dysku) |
 | F9 | koduj (Esc przerywa) |
 | F10, Ctrl+C | wyjście |
+| Mysz | klik — kursor i zaznaczenie pliku; podwójny klik — zaznaczone + kliknięty plik do kolejki (na katalogu: wejście); prawy klik — MediaInfo; kółko — przewijanie; klik na pasku F1–F10 — klawisz. Zaznaczanie tekstu w terminalu: z wciśniętym Shift |
+
+Długa nazwa zaznaczonego pliku, która nie mieści się w kolumnie, przewija się sama, więc da się ją przeczytać
+przy każdym rozmiarze okna.
 
 **F7 — opcje.** Wiersz „Kodek wideo” przełącza między działającymi w systemie kombinacjami kodeka i karty,
 np. `HEVC NVENC → AV1 NVENC → HEVC QSV`; pod listą widać, co wykryto. Pozostałe wiersze odpowiadają flagom z tabeli niżej.
@@ -116,6 +121,7 @@ wypisywanym jako tekst.
     videopipeline --intel -q 22 film.mp4       # HEVC na karcie Intel, CQ 22
     videopipeline -b                           # bieżący katalog
     videopipeline --detect                     # pokaż wykryte enkodery i zakończ
+    videopipeline --mediainfo film.mkv         # pełny raport MediaInfo (jak `mediainfo film.mkv`)
 
 Kod wyjścia: 0 — sukces, 1 — błędy, 130 — przerwano (Ctrl+C). `--tui` z plikami otwiera TUI z wypełnioną kolejką.
 
@@ -160,7 +166,7 @@ W MP4 Dolby Vision zostaje w strumieniu, ale bez rekordu konfiguracji — częś
 ### Wersja deweloperska
 
 Potrzebne: Rust (stable) oraz w `PATH`: ffmpeg i ffprobe z obsługą wybranej karty (NVENC/CUDA albo QSV/VAAPI),
-mkvmerge (mkvtoolnix), [dovi_tool](https://github.com/quietvoid/dovi_tool), [hdr10plus_tool](https://github.com/quietvoid/hdr10plus_tool).
+mkvmerge (mkvtoolnix), mediainfo, [dovi_tool](https://github.com/quietvoid/dovi_tool), [hdr10plus_tool](https://github.com/quietvoid/hdr10plus_tool).
 
     ./build.sh       # target/release/videopipeline + libvideopipeline_core.so
     ./install.sh     # opcjonalnie: ~/.local/bin (z biblioteką libstd Rusta), ikona i wpis w menu

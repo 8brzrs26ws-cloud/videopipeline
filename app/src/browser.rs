@@ -227,14 +227,21 @@ impl Browser {
     }
 
     pub fn toggle_mark(&mut self) {
+        if self.toggle_mark_here() {
+            self.move_by(1);
+        }
+    }
+
+    /// Zaznacza/odznacza bieżącą pozycję bez przesuwania kursora (kliknięcie myszą).
+    pub fn toggle_mark_here(&mut self) -> bool {
         let path = match self.selected() {
             Some(e) if !e.is_up => e.path.clone(),
-            _ => return,
+            _ => return false,
         };
         if !self.marked.remove(&path) {
             self.marked.insert(path);
         }
-        self.move_by(1);
+        true
     }
 }
 

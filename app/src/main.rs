@@ -49,6 +49,9 @@ struct Cli {
     /// Pokaż wykryte enkodery GPU i zakończ
     #[arg(long)]
     detect: bool,
+    /// Wypisz pełne informacje MediaInfo o podanych plikach (katalog = wszystkie filmy w nim) i zakończ
+    #[arg(long = "mediainfo")]
+    mediainfo: bool,
     /// Pierwsza polska ścieżka -> E-AC-3 stereo 192 kb/s
     #[arg(long)]
     pleac3: bool,
@@ -109,6 +112,37 @@ fn prepend_bundled_tools_to_path() {
     }
 }
 
+/// `--mediainfo`: pełny raport MediaInfo dla każdego pliku (jak `mediainfo plik`).
+fn print_mediainfo(paths: &[PathBuf]) -> Result<i32> {
+    if paths.is_empty() {
+        eprintln!("Podaj plik lub katalog: videopipeline --mediainfo film.mkv");
+        return Ok(1);
+    }
+    let mut files = vec![];
+    for p in paths {
+        if p.is_dir() {
+            files.extend(files::videos_in(p));
+        } else {
+            files.push(p.clone());
+        }
+    }
+    let mut code = 0;
+    for (i, f) in files.iter().enumerate() {
+        if i > 0 {
+            println!();
+        }
+        match videopipeline_core::mediainfo::full(f) {
+            Ok(t) => print!("{t}"),
+            Err(e) => {
+                eprintln!("{}: {e}", f.display());
+                code = 1;
+            }
+        }
+    }
+    term::wait_for_enter_if_relaunched();
+    Ok(code)
+}
+
 /// Silnik: --engine > --intel (QSV, zapasowo VAAPI) > domyślny (NVIDIA, a bez niej Intel).
 fn pick_engine(cli: &Cli, hw: &HwInfo, codec: Codec) -> std::result::Result<Engine, String> {
     if let Some(e) = cli.engine.as_deref().and_then(Engine::from_name) {
@@ -164,6 +198,7 @@ fn real_main() -> Result<i32> {
         "-pdv" | "-nodv" => "--no-dv".to_string(),
         "-ph" | "-nohdr10plus" => "--no-hdr10plus".to_string(),
         "-intel" => "--intel".to_string(),
+        "-mi" => "--mediainfo".to_string(),
         "-nvenc" => "--engine=nvenc".to_string(),
         "-qsv" => "--engine=qsv".to_string(),
         "-vaapi" => "--engine=vaapi".to_string(),
@@ -172,6 +207,10 @@ fn real_main() -> Result<i32> {
     let cli = Cli::parse_from(args);
     let codec = if cli.av1 { Codec::Av1 } else { Codec::Hevc };
     let script = !cli.tui && (!cli.paths.is_empty() || cli.batch);
+
+    if cli.mediainfo {
+        return print_mediainfo(&cli.paths);
+    }
 
     if cli.detect {
         // Diagnostyka: wersja ffmpeg, każdy test z poleceniem i błędem ffmpeg.

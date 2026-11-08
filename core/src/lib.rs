@@ -14,6 +14,7 @@ pub mod encode;
 pub mod files;
 pub mod hw;
 pub mod intelmon;
+pub mod mediainfo;
 pub mod platform;
 #[cfg(windows)]
 pub mod winmon;
