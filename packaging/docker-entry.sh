@@ -10,6 +10,15 @@ git config --global --add safe.directory /src 2>/dev/null || true
 # Binarka z kontenera ma rpath do toolchaina w kontenerze i nie uruchomi się wprost na hoście.
 export CARGO_TARGET_DIR=/src/build/target
 TARGETS="${TARGETS:-linux windows}"
+
+# Jedna wersja ffmpeg dla wszystkich celów: "latest" ustalane raz, tutaj (z kilku źródeł).
+source packaging/ffmpeg-source.sh
+if [[ "${FFMPEG_VERSION:-latest}" = latest ]]; then
+    FFMPEG_VERSION="$(ffmpeg_latest /src/build/work)"
+    [[ -n "$FFMPEG_VERSION" ]] || { echo "BŁĄD: nie udało się ustalić najnowszej wersji ffmpeg — podaj FFMPEG_VERSION=..." >&2; exit 1; }
+fi
+export FFMPEG_VERSION
+echo "ffmpeg dla wszystkich celów: $FFMPEG_VERSION"
 if [[ " $TARGETS " == *" linux "* ]]; then
     bash packaging/appimage/build-appimage.sh
     bash packaging/deb/build-deb.sh

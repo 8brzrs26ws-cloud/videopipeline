@@ -45,10 +45,11 @@ latest_git_tag() {   # $1 = repo URL; zwraca najwyższy tag semver (bez prefiksu
     git ls-remote --tags --refs "$1" | sed 's|.*refs/tags/||' | grep -E '^v?[0-9]+(\.[0-9]+)+$' \
         | sed 's/^v//' | sort -V | tail -n1
 }
+# shellcheck source=../ffmpeg-source.sh
+source "$ROOT/packaging/ffmpeg-source.sh"
 if [[ "$FFMPEG_VERSION" = latest ]]; then
-    FFMPEG_VERSION="$(wget -qO- https://ffmpeg.org/releases/ | grep -oE 'ffmpeg-[0-9]+\.[0-9]+(\.[0-9]+)?\.tar\.xz' \
-        | sed -E 's/ffmpeg-(.*)\.tar\.xz/\1/' | sort -uV | tail -n1)"
-    [[ -n "$FFMPEG_VERSION" ]] || fail "nie udało się ustalić najnowszej wersji ffmpeg"
+    FFMPEG_VERSION="$(ffmpeg_latest "$BUILD/work")"
+    [[ -n "$FFMPEG_VERSION" ]] || fail "nie udało się ustalić najnowszej wersji ffmpeg (ffmpeg.org, GitHub, git.ffmpeg.org) — podaj FFMPEG_VERSION=..."
 fi
 [[ "$DOVI_TOOL_REF" = latest ]] && DOVI_TOOL_REF="$(latest_git_tag https://github.com/quietvoid/dovi_tool)"
 [[ "$HDR10PLUS_TOOL_REF" = latest ]] && HDR10PLUS_TOOL_REF="$(latest_git_tag https://github.com/quietvoid/hdr10plus_tool)"
@@ -111,10 +112,8 @@ build_ffmpeg() {   # $1 = 1|0 (Intel); prefiks = prefix_for $1
     make -C "$WORK/nv-codec-headers" PREFIX="$NVH" install >/dev/null
 
     local src="$WORK/ffmpeg-$FFMPEG_VERSION"
-    rm -rf "$src"
-    [[ -f "$WORK/ffmpeg-$FFMPEG_VERSION.tar.xz" ]] \
-        || wget -q -O "$WORK/ffmpeg-$FFMPEG_VERSION.tar.xz" "https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz"
-    tar -C "$WORK" -xf "$WORK/ffmpeg-$FFMPEG_VERSION.tar.xz"
+    ffmpeg_unpack "$FFMPEG_VERSION" "$WORK" "$WORK" \
+        || fail "nie udało się pobrać źródeł ffmpeg $FFMPEG_VERSION (ffmpeg.org ani GitHub)"
     (
         cd "$src"
         export PKG_CONFIG_PATH="$NVH/lib/pkgconfig:${PKG_CONFIG_PATH:-}"

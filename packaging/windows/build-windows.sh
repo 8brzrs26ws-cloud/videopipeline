@@ -71,11 +71,9 @@ resolve() {   # $1 = nazwa zmiennej, $2 = opis źródła, reszta = polecenie wyp
     [[ -n "$v" ]] || fail "nie udało się ustalić najnowszej wersji: $name ($what) — podaj ją ręcznie, np. $name=..."
     printf -v "$name" '%s' "$v"
 }
-ffmpeg_latest() {
-    { wget -qO- https://ffmpeg.org/releases/ || true; } | { grep -oE 'ffmpeg-[0-9]+\.[0-9]+(\.[0-9]+)?\.tar\.xz' || true; } \
-        | sed -E 's/ffmpeg-(.*)\.tar\.xz/\1/' | sort -uV | tail -n1
-}
-resolve FFMPEG_VERSION "ffmpeg.org/releases" ffmpeg_latest
+# shellcheck source=../ffmpeg-source.sh
+source "$ROOT/packaging/ffmpeg-source.sh"
+resolve FFMPEG_VERSION "ffmpeg.org, GitHub, git.ffmpeg.org" ffmpeg_latest "$BUILD/work"
 resolve DOVI_TOOL_REF "github.com/quietvoid/dovi_tool" latest_git_tag https://github.com/quietvoid/dovi_tool
 resolve HDR10PLUS_TOOL_REF "github.com/quietvoid/hdr10plus_tool" latest_git_tag https://github.com/quietvoid/hdr10plus_tool
 resolve DAV1D_REF "code.videolan.org/videolan/dav1d" latest_git_tag https://code.videolan.org/videolan/dav1d.git
@@ -199,9 +197,9 @@ FFPREFIX="$CACHE/ffmpeg-$FFMPEG_VERSION"
 FFSTAMP="$DEPSTAMP cpu=$TARGET_CPU"
 if [[ "$FORCE" = 1 || ! -f "$FFPREFIX/bin/ffmpeg.exe" || "$(cat "$FFPREFIX/.stamp" 2>/dev/null)" != "$FFSTAMP" ]]; then
     SRC="$WORK/ffmpeg-$FFMPEG_VERSION"
-    TARBALL="$BUILD/work/ffmpeg-$FFMPEG_VERSION.tar.xz"   # wspólny z buildem Linux
-    [[ -f "$TARBALL" ]] || wget -q -O "$TARBALL" "https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz"
-    rm -rf "$SRC" && tar -C "$WORK" -xf "$TARBALL"
+    # Archiwum źródeł wspólne z buildem Linux (build/work).
+    ffmpeg_unpack "$FFMPEG_VERSION" "$WORK" "$BUILD/work" \
+        || fail "nie udało się pobrać źródeł ffmpeg $FFMPEG_VERSION (ffmpeg.org ani GitHub)"
     (
         cd "$SRC"
         # Tylko nasze .pc — żadnych bibliotek Linuksa z kontenera.
