@@ -9,5 +9,6 @@ SYSROOT="$(rustc --print sysroot)"
 export RUSTFLAGS="-C prefer-dynamic -C link-arg=-Wl,-rpath,\$ORIGIN -C link-arg=-Wl,-rpath,\$ORIGIN/../lib -C link-arg=-Wl,-rpath,${SYSROOT}/lib -C link-arg=-Wl,-rpath,${SYSROOT}/lib/rustlib/x86_64-unknown-linux-gnu/lib ${VP_RUSTFLAGS_EXTRA:-}"
 cargo build --release "$@"
 echo
-echo "Gotowe: target/release/videopipeline + target/release/libvideopipeline_core.so"
+OUT="${CARGO_TARGET_DIR:-target}/release"
+echo "Gotowe: $OUT/videopipeline + $OUT/libvideopipeline_core.so"
 echo "Przy kopiowaniu zabierz oba pliki do tego samego katalogu."

@@ -12,9 +12,24 @@ PREFIX="${PREFIX:-$HOME/.local}"
 ICONS="$PREFIX/share/icons/hicolor"
 mkdir -p "$PREFIX/bin" "$PREFIX/share/applications" "$ICONS/scalable/apps"
 
-# Biblioteka leży obok binarki — rpath $ORIGIN z build.sh ją znajdzie.
+# libstd Rusta, z którą zbudowano binarkę (nazwa z hashem toolchaina). Kopiujemy ją obok binarki,
+# żeby instalacja przetrwała `rustup update` i nie zależała od toolchaina.
+STD="$(readelf -d "$LIB" 2>/dev/null | sed -n 's/.*Shared library: \[\(libstd-[^]]*\.so\)\].*/\1/p' | head -n1)"
+[[ -n "$STD" ]] || { echo "Nie udało się ustalić libstd binarki (readelf z binutils?)" >&2; exit 1; }
+SYSROOT="$(rustc --print sysroot 2>/dev/null || true)"
+STD_PATH="$(find "$SYSROOT/lib" -name "$STD" 2>/dev/null | head -n1)"
+if [[ -z "$STD_PATH" ]]; then
+  echo "Binarka wymaga $STD, którego nie ma w obecnym toolchainie Rusta." >&2
+  echo "Prawdopodobnie target/ pochodzi z innego toolchaina (np. starsza wersja Rusta albo kontener)." >&2
+  echo "Przebuduj na tym komputerze: ./build.sh  i ponów ./install.sh" >&2
+  exit 1
+fi
+
+# Biblioteki leżą obok binarki — rpath $ORIGIN z build.sh je znajdzie.
 install -m 755 "$BIN" "$PREFIX/bin/videopipeline"
 install -m 755 "$LIB" "$PREFIX/bin/libvideopipeline_core.so"
+rm -f "$PREFIX"/bin/libstd-*.so
+install -m 644 "$STD_PATH" "$PREFIX/bin/$STD"
 
 # Ikona: SVG (skalowalna) + PNG 48/64/128/256.
 install -m 644 icons/videopipeline.svg "$ICONS/scalable/apps/videopipeline.svg"

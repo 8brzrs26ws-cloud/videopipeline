@@ -99,7 +99,7 @@ export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER="$TRIPLE-gcc"
 log "1/6 videopipeline.exe + videopipeline_core.dll ($TARGET_CPU)"
 # RUSTFLAGS zastępuje .cargo/config.toml — prefer-dynamic podajemy jawnie (biblioteka core jako DLL).
 RUSTFLAGS="-C prefer-dynamic -C target-cpu=$TARGET_CPU" cargo build --release --target "$RTARGET"
-OUT="target/$RTARGET/release"
+OUT="${CARGO_TARGET_DIR:-target}/$RTARGET/release"
 [[ -f "$OUT/videopipeline.exe" && -f "$OUT/videopipeline_core.dll" ]] || fail "brak videopipeline.exe / videopipeline_core.dll"
 STD_DLL="$(find "$(rustc --print sysroot)/lib/rustlib/$RTARGET" -name 'std-*.dll' | head -n1)"
 [[ -n "$STD_DLL" ]] || fail "brak std-*.dll celu $RTARGET"
