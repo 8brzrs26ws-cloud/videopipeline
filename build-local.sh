@@ -12,7 +12,7 @@
 # Zmienne (przekazywane do kontenera): FFMPEG_VERSION (domyślnie latest), DOVI_TOOL_REF, HDR10PLUS_TOOL_REF, NVCODEC_HEADERS_REF
 #   — wartość "latest" bierze najnowsze wydanie; INTEL=auto|1|0 (VAAPI/QSV w ffmpeg); TARGET_CPU; FORCE=1;
 #   Windows: DAV1D_REF, LIBVPL_REF, MKVTOOLNIX_VERSION (domyślnie latest).
-# Silnik: docker lub podman (DOCKER=podman).
+# Silnik: docker lub podman (DOCKER=podman). Sieć: domyślnie hosta (DOCKER_NETWORK=bridge — mostek Dockera).
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
@@ -38,7 +38,10 @@ export TARGETS
 # dist/ zawiera tylko wynik bieżącego budowania danego celu (starsze wersje są na GitHub Releases).
 [[ " $TARGETS " == *" linux "* ]] && rm -f dist/*.AppImage dist/*.AppImage.sha256 dist/*.deb dist/*.deb.sha256
 [[ " $TARGETS " == *" windows "* ]] && rm -f dist/*windows*.zip dist/*windows*.zip.sha256
-"$ENGINE" build -t "$IMAGE" docker
+# Sieć hosta zamiast mostka Dockera: kontener tylko pobiera źródła, a mostek (veth) potrafi nie działać,
+# np. po aktualizacji jądra bez restartu ("failed to add the host <=> sandbox pair interfaces").
+NET="${DOCKER_NETWORK:-host}"
+"$ENGINE" build --network "$NET" -t "$IMAGE" docker
 
 # Domyślnie najnowszy stabilny ffmpeg (nadpisz np. FFMPEG_VERSION=7.1.1 dla powtarzalnego wydania).
 export FFMPEG_VERSION="${FFMPEG_VERSION:-latest}"
@@ -49,7 +52,7 @@ for v in FFMPEG_VERSION DOVI_TOOL_REF HDR10PLUS_TOOL_REF NVCODEC_HEADERS_REF INT
     [[ -n "${!v:-}" ]] && PASS+=(-e "$v=${!v}")
 done
 
-"$ENGINE" run --rm \
+"$ENGINE" run --rm --network "$NET" \
     --user "$(id -u):$(id -g)" \
     -e HOME=/tmp/home -e CARGO_HOME=/src/build/cargo-home -e APPIMAGE_EXTRACT_AND_RUN=1 \
     "${PASS[@]}" \
