@@ -24,6 +24,10 @@ Uwagi
   - Pliki nie są podpisane cyfrowo — SmartScreen może poprosić o potwierdzenie
     („Więcej informacji” → „Uruchom mimo to”).
   - Domyślny katalog wyników: %USERPROFILE%\Videos (zmiana w F7).
+  - utworz-skrot.cmd tworzy skrót "VideoPipeline" na pulpicie i w menu Start.
+    Skrót uruchamia program w klasycznej konsoli (conhost), w której pasek zadań
+    pokazuje ikonę VideoPipeline — Windows Terminal zawsze pokazuje własną ikonę.
+    Skrót można przypiąć do paska zadań.
   - F3 otwiera plik w dołączonym mpv w osobnym oknie (q zamyka odtwarzacz).
   - W lewym panelu, w katalogu głównym dysku, widać pozostałe dyski (C:, D: …).
 

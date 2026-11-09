@@ -967,6 +967,7 @@ fn expand_home(s: &str) -> PathBuf {
 // -------------------------------------------------------------------------
 
 pub fn run(app: &mut App) -> Result<()> {
+    let _look = crate::window::Look::apply(); // tytuł „VideoPipeline” (Windows: też ikona okna)
     let mut terminal = ratatui::init();
     // Mysz: kliknięcia i kółko. (Zaznaczanie tekstu w terminalu działa wtedy z wciśniętym Shift.)
     let _ = execute!(std::io::stdout(), EnableMouseCapture);

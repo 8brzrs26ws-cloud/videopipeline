@@ -24,17 +24,20 @@ fn in_path(name: &str) -> bool {
 }
 
 /// (program, argumenty poprzedzające polecenie). Kolejność: KDE najpierw.
+/// Okno dostaje tytuł „VideoPipeline”, a gdzie terminal na to pozwala — klasę / app-id
+/// „videopipeline”, więc pasek zadań dopasuje je do videopipeline.desktop (ikona programu).
+/// Konsole nie pozwala zmienić app-id: tytuł karty „VideoPipeline” + reguła KWin (window.rs).
 #[cfg(not(windows))]
 const TERMINALS: &[(&str, &[&str])] = &[
-    ("konsole", &["-e"]),
-    ("gnome-terminal", &["--"]),
-    ("xfce4-terminal", &["-x"]),
-    ("kitty", &[]),
-    ("alacritty", &["-e"]),
-    ("wezterm", &["start", "--"]),
-    ("foot", &[]),
-    ("lxterminal", &["-e"]),
-    ("xterm", &["-e"]),
+    ("konsole", &["-p", "LocalTabTitleFormat=VideoPipeline", "-p", "RemoteTabTitleFormat=VideoPipeline", "-e"]),
+    ("gnome-terminal", &["--title=VideoPipeline", "--"]),
+    ("xfce4-terminal", &["--title=VideoPipeline", "-x"]),
+    ("kitty", &["--class", "videopipeline", "--title", "VideoPipeline"]),
+    ("alacritty", &["--class", "videopipeline,videopipeline", "--title", "VideoPipeline", "-e"]),
+    ("wezterm", &["start", "--class", "videopipeline", "--"]),
+    ("foot", &["--app-id=videopipeline", "--title=VideoPipeline"]),
+    ("lxterminal", &["--title=VideoPipeline", "-e"]),
+    ("xterm", &["-class", "videopipeline", "-T", "VideoPipeline", "-e"]),
 ];
 
 /// Windows: konsola ma pojedynczy proces (nasz) = uruchomienie dwuklikiem z Eksploratora.

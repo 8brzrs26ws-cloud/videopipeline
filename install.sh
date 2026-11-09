@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Instaluje videopipeline do ~/.local (binarka + biblioteka + ikona) i dodaje wpis do menu KDE.
-# Uruchomienie z menu otwiera okno terminala (Terminal=true w pliku .desktop).
+# Uruchomienie z menu: program sam otwiera okno terminala z tytułem/klasą „videopipeline”.
+# KDE Plasma: dodaje regułę okna KWin, żeby pasek zadań pokazywał ikonę VideoPipeline (videopipeline --kde-icon off wyłącza).
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -45,6 +46,11 @@ chmod 755 "$DESKTOP"
 command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -f -t "$ICONS" >/dev/null 2>&1 || true
 command -v update-desktop-database >/dev/null && update-desktop-database "$PREFIX/share/applications" >/dev/null 2>&1 || true
 command -v kbuildsycoca6 >/dev/null && kbuildsycoca6 >/dev/null 2>&1 || true
+
+# KDE: ikona VideoPipeline zamiast Konsole na pasku zadań (reguła okna KWin).
+if [[ "${XDG_CURRENT_DESKTOP:-}" == *KDE* ]]; then
+  "$PREFIX/bin/videopipeline" --kde-icon on || true
+fi
 
 echo "Zainstalowano w $PREFIX/bin. Uruchom z menu aplikacji (VideoPipeline)."
 echo "Jeśli ikona nie pojawi się od razu, wyloguj się i zaloguj ponownie albo uruchom: kbuildsycoca6 --noincremental"

@@ -50,7 +50,7 @@ need() { command -v "$1" >/dev/null 2>&1 || fail "brak polecenia: $1"; }
 # Każdy nieobsłużony błąd (set -e) pokazuje, gdzie i na czym skrypt się zatrzymał.
 trap 'fail "przerwano w linii $LINENO: $BASH_COMMAND"' ERR
 
-for c in cargo rustc "$CC_W" "$CXX_W" "$TRIPLE-objdump" "$TRIPLE-strip" meson ninja cmake nasm clang \
+for c in cargo rustc "$CC_W" "$CXX_W" "$TRIPLE-objdump" "$TRIPLE-strip" "$TRIPLE-windres" meson ninja cmake nasm clang \
          pkg-config git wget zip; do need "$c"; done
 SEVENZ="$(command -v 7zz || command -v 7z || true)"
 [[ -n "$SEVENZ" ]] || fail "brak 7zz/7z (pakiet 7zip)"
@@ -131,7 +131,8 @@ export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER="$TRIPLE-gcc"
 # ------------------------------------------------------------------ 1. aplikacja
 log "1/6 videopipeline.exe + videopipeline_core.dll ($TARGET_CPU)"
 # RUSTFLAGS zastępuje .cargo/config.toml — prefer-dynamic podajemy jawnie (biblioteka core jako DLL).
-RUSTFLAGS="-C prefer-dynamic -C target-cpu=$TARGET_CPU" cargo build --release --target "$RTARGET"
+# app/build.rs wkompilowuje ikonę i informacje o wersji przez windres.
+WINDRES="$TRIPLE-windres" RUSTFLAGS="-C prefer-dynamic -C target-cpu=$TARGET_CPU" cargo build --release --target "$RTARGET"
 OUT="${CARGO_TARGET_DIR:-target}/$RTARGET/release"
 [[ -f "$OUT/videopipeline.exe" && -f "$OUT/videopipeline_core.dll" ]] || fail "brak videopipeline.exe / videopipeline_core.dll"
 STD_DLL="$(find "$(rustc --print sysroot)/lib/rustlib/$RTARGET" -name 'std-*.dll' | head -n1)"
@@ -320,6 +321,9 @@ done
 [[ -d "$MKV/mkvtoolnix/data" ]] && cp -r "$MKV/mkvtoolnix/data" "$PKG/"
 "$TRIPLE-strip" "$PKG/ffmpeg.exe" "$PKG/ffprobe.exe" "$PKG/dovi_tool.exe" "$PKG/hdr10plus_tool.exe" 2>/dev/null || true
 
+# Ikona w zasobach videopipeline.exe (sekcja .rsrc z app/build.rs).
+"$TRIPLE-objdump" -h "$PKG/videopipeline.exe" | grep '\.rsrc' >/dev/null || fail "videopipeline.exe bez zasobów (ikony) — sprawdź windres"
+
 # Zależności DLL: wszystko poza bibliotekami systemu Windows musi leżeć w pakiecie.
 SYSTEM_DLL='^(kernel32|kernelbase|user32|advapi32|shell32|shlwapi|ole32|oleaut32|gdi32|ws2_32|bcrypt|bcryptprimitives|secur32|crypt32|ncrypt|ntdll|msvcrt|ucrtbase|api-ms-win-.*|ext-ms-win-.*|comdlg32|comctl32|winmm|psapi|setupapi|cfgmgr32|dxgi|d3d9|d3d11|d3d12|dxva2|mfplat|mf|mfreadwrite|evr|version|userenv|iphlpapi|dbghelp|imm32|pdh|powrprof|normaliz|wldap32|rpcrt4|winhttp|wininet|uxtheme|dwmapi|opengl32|mpr|netapi32|avrt|mscms|propsys|synchronization|winspool\.drv|avicap32|msvfw32|msacm32|ksuser|shcore|dwrite|d2d1|d3dcompiler_47|mfcore|mfuuid|cryptbase|wintrust|hid|xinput1_4|dsound|dinput8|vulkan-1|d3dcompiler_43)\.dll$'
 MINGW_DIRS=(/usr/lib/gcc/$TRIPLE/*-posix "/usr/$TRIPLE/lib")
@@ -345,6 +349,9 @@ done
 cp LICENSE "$PKG/LICENSE.txt"
 cp packaging/appimage/THIRD-PARTY-NOTICES.md "$PKG/"
 cp packaging/windows/README-Windows.txt "$PKG/"
+# Skrót „VideoPipeline” (pulpit + menu Start) uruchamiający program w klasycznej konsoli (conhost),
+# w której pasek zadań pokazuje ikonę programu. Pliki .cmd/.ps1 z końcami linii CRLF.
+for f in utworz-skrot.cmd utworz-skrot.ps1; do sed 's/$/\r/' "packaging/windows/$f" > "$PKG/$f"; done
 cp icons/videopipeline-256.png "$PKG/videopipeline.png"
 
 ZIP="$DIST/$PKGNAME.zip"

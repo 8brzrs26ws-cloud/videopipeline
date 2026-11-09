@@ -83,7 +83,7 @@ fn find_mpv() -> Option<PathBuf> {
 
 /// AppImage podsuwa własne kopie bibliotek (LD_LIBRARY_PATH z katalogiem videopipeline-libs) —
 /// mpv z systemu musi ich nie widzieć.
-fn clean_env(cmd: &mut Command) {
+pub(crate) fn clean_env(cmd: &mut Command) {
     if let Some(v) = std::env::var_os("LD_LIBRARY_PATH") {
         let kept: Vec<PathBuf> = std::env::split_paths(&v)
             .filter(|p| !p.to_string_lossy().contains("videopipeline-libs"))

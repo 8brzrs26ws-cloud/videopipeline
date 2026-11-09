@@ -56,8 +56,25 @@ Do kodowania na Intelu doinstaluj `intel-media-driver` i `vpl-gpu-rt`; na NVIDII
 konsoli; najlepiej wygląda w Windows Terminal). Wszystkie pliki muszą zostać w jednym folderze. Pliki nie są podpisane
 cyfrowo, więc SmartScreen może poprosić o potwierdzenie. Pliki przeciągnięte na `videopipeline.exe` są od razu kodowane
 (tryb skryptowy). W lewym panelu, w katalogu głównym dysku, widać pozostałe dyski.
+`utworz-skrot.cmd` z paczki tworzy skrót „VideoPipeline” na pulpicie i w menu Start (zob. niżej: ikona na pasku zadań).
 
 Sumy kontrolne leżą obok plików (`.sha256`).
+
+### Ikona na pasku zadań
+
+TUI działa w oknie terminala, więc pasek zadań pokazuje zwykle ikonę terminala. VideoPipeline ustawia tytuł okna
+„VideoPipeline” (przywracany przy wyjściu), a dodatkowo:
+
+- **KDE Plasma (Konsole)** — przy starcie TUI program dodaje regułę okna KWin (`~/.config/kwinrulesrc`), dzięki której
+  okno Konsole z VideoPipeline ma ikonę programu. Działa dla okien otwieranych przez program (menu aplikacji, dwuklik),
+  a nie dla wpisania `videopipeline` w już otwartej Konsoli — KWin sprawdza regułę przy otwarciu okna. Wymaga
+  zainstalowanego wpisu w menu (deb, pakiet Arch, `install.sh`). `videopipeline --kde-icon off` usuwa regułę i
+  wyłącza jej dodawanie, `--kde-icon on` przywraca; `uninstall.sh` usuwa ją sam. Przed `apt remove` / `pacman -R`
+  można wywołać `videopipeline --kde-icon off`.
+- **kitty, foot, alacritty, wezterm, xterm** — okno otwierane z menu dostaje klasę / app-id `videopipeline`,
+  więc ikona działa bez reguł, także poza KDE.
+- **Windows** — `videopipeline.exe` ma wbudowaną ikonę. W klasycznej konsoli (conhost) program ustawia ją na oknie;
+  Windows Terminal zawsze pokazuje własną ikonę. Skrót z `utworz-skrot.cmd` uruchamia program w conhost.
 
 ## Użycie
 
@@ -124,6 +141,7 @@ wypisywanym jako tekst.
     videopipeline -b                           # bieżący katalog
     videopipeline --detect                     # pokaż wykryte enkodery i zakończ
     videopipeline --mediainfo film.mkv         # pełny raport MediaInfo (jak `mediainfo film.mkv`)
+    videopipeline --kde-icon off               # KDE: usuń regułę okna z ikoną na pasku zadań (on = przywróć)
 
 Kod wyjścia: 0 — sukces, 1 — błędy, 130 — przerwano (Ctrl+C). `--tui` z plikami otwiera TUI z wypełnioną kolejką.
 

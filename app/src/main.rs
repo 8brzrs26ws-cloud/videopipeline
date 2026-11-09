@@ -7,6 +7,7 @@ mod player;
 mod render;
 mod term;
 mod theme;
+mod window;
 
 use anyhow::Result;
 use clap::Parser;
@@ -54,6 +55,9 @@ struct Cli {
     /// Wypisz pełne informacje MediaInfo o podanych plikach (katalog = wszystkie filmy w nim) i zakończ
     #[arg(long = "mediainfo")]
     mediainfo: bool,
+    /// KDE Plasma: reguła okna KWin z ikoną VideoPipeline na pasku zadań (domyślnie dodawana przy starcie TUI)
+    #[arg(long = "kde-icon", value_name = "on|off", value_parser = ["on", "off"])]
+    kde_icon: Option<String>,
     /// Pierwsza polska ścieżka -> E-AC-3 stereo 192 kb/s
     #[arg(long)]
     pleac3: bool,
@@ -214,6 +218,25 @@ fn real_main() -> Result<i32> {
         return print_mediainfo(&cli.paths);
     }
 
+    if let Some(v) = &cli.kde_icon {
+        #[cfg(unix)]
+        {
+            return match window::kde::set_enabled(v == "on") {
+                Ok(m) => {
+                    println!("{m}");
+                    Ok(0)
+                }
+                Err(e) => anyhow::bail!("{e}"),
+            };
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = v;
+            println!("--kde-icon dotyczy tylko KDE Plasma (Linux).");
+            return Ok(0);
+        }
+    }
+
     if cli.detect {
         // Diagnostyka: wersja ffmpeg, każdy test z poleceniem i błędem ffmpeg.
         match hw::ffmpeg_version() {
@@ -312,6 +335,9 @@ fn real_main() -> Result<i32> {
         };
         (dir, initial)
     };
+
+    #[cfg(unix)]
+    window::kde::auto_install(); // KDE: ikona VideoPipeline zamiast Konsole na pasku zadań
 
     let mut app = app::App::new(opts, hw, start_dir, initial);
     if let Err(e) = picked {
