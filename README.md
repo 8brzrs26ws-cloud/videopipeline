@@ -74,6 +74,7 @@ po lewej pliki, po prawej kolejkę kodowania.
 | Shift+↑↓ / PgUp / PgDn / Home / End | zaznaczanie wielu pozycji |
 | `+` `-` `*` | zaznacz wszystko / wyczyść / odwróć |
 | F2 | informacje o pliku (MediaInfo, w stylu widoku „Easy”): kontener, rozmiar, czas, każdy strumień wideo/audio/napisów w jednej linii; ↑↓ przewijanie, Esc zamyka |
+| F3 | odtwórz plik (lewy panel) lub pozycję kolejki w [mpv](https://mpv.io) — tylko w TUI i w środowisku graficznym (X11/Wayland, Windows). mpv jest dołączony do paczek; przy buildzie ze źródeł używany jest mpv z systemu |
 | F4 | zmień nazwę pliku lub katalogu w lewym panelu (kursor stoi przed rozszerzeniem — wygodne dopisanie np. `_v2`) |
 | F5 | dodaj zaznaczone do kolejki (katalog = wszystkie filmy w nim) |
 | F6 | usuń zaznaczone (lub bieżący) pliki i katalogi z dysku w lewym panelu — po potwierdzeniu; przy katalogach okno ostrzega, ile plików i GB zniknie, potwierdzenie: Enter lub T, anulowanie: Esc lub N; gdy brakuje uprawnień, okno wyjaśnia, czego brakuje (właściciel, prawa zapisu) i podaje polecenie naprawy; katalogu głównego i domowego nie usuwa |
@@ -167,7 +168,7 @@ W MP4 Dolby Vision zostaje w strumieniu, ale bez rekordu konfiguracji — częś
 ### Wersja deweloperska
 
 Potrzebne: Rust (stable) oraz w `PATH`: ffmpeg i ffprobe z obsługą wybranej karty (NVENC/CUDA albo QSV/VAAPI),
-mkvmerge (mkvtoolnix), mediainfo, [dovi_tool](https://github.com/quietvoid/dovi_tool), [hdr10plus_tool](https://github.com/quietvoid/hdr10plus_tool).
+mkvmerge (mkvtoolnix), mediainfo, mpv (opcjonalnie, dla F3), [dovi_tool](https://github.com/quietvoid/dovi_tool), [hdr10plus_tool](https://github.com/quietvoid/hdr10plus_tool).
 
     ./build.sh       # target/release/videopipeline + libvideopipeline_core.so
     ./install.sh     # opcjonalnie: ~/.local/bin (z biblioteką libstd Rusta), ikona i wpis w menu
@@ -181,6 +182,9 @@ i leżeć w tym samym katalogu (albo binarka w `bin/`, biblioteka w `../lib/`).
 Wydania buduje się w kontenerze Debian 13, więc wynik nie zależy od systemu, na którym budujesz. Wersja dla Windows
 powstaje tam przez kroskompilację (MinGW-w64, cel Rusta `x86_64-pc-windows-gnu`): aplikacja, dovi_tool, hdr10plus_tool,
 dav1d, libvpl i ffmpeg są kompilowane ze źródeł, a mkvmerge pochodzi z oficjalnej wersji przenośnej MKVToolNix.
+Odtwarzacz mpv (F3) dla Linuksa jest kompilowany ze źródeł; dla Windows dołączany jest gotowy build
+[shinchiro/mpv-winbuild-cmake](https://github.com/shinchiro/mpv-winbuild-cmake) (x86-64-v3), bo kroskompilacja mpv
+z całym drzewem zależności byłaby bardzo długa.
 
     ./install-build-deps.sh     # raz: Docker, git, gh (Arch/CachyOS, Debian/Ubuntu); potem wyloguj się i zaloguj
     ./build-local.sh            # dist/: AppImage, deb, pakiet Arch, .zip dla Windows i sumy .sha256; cache w ./build
@@ -195,7 +199,9 @@ Zmienne dla `build-local.sh`:
 | `FFMPEG_VERSION` | wersja ffmpeg, domyślnie `latest` (najnowsze wydanie) |
 | `DOVI_TOOL_REF`, `HDR10PLUS_TOOL_REF` | tagi narzędzi (domyślnie przypięte), `latest` = najnowsze |
 | `INTEL` | Linux: `auto` (domyślnie), `1` — wymagaj QSV/VAAPI, `0` — bez Intela |
-| `DAV1D_REF`, `LIBVPL_REF`, `MKVTOOLNIX_VERSION` | Windows: wersje bibliotek i MKVToolNix, domyślnie `latest` |
+| `DAV1D_REF`, `LIBVPL_REF`, `MKVTOOLNIX_VERSION`, `MEDIAINFO_VERSION` | Windows: wersje bibliotek, MKVToolNix i MediaInfo, domyślnie `latest` |
+| `MPV_VERSION` | Linux: wersja mpv budowanego ze źródeł (np. `0.41.0`), domyślnie `latest` |
+| `MPV_WIN_TAG` | Windows: tag wydania shinchiro (data, np. `20261108`), domyślnie `latest` |
 | `TARGET_CPU` | domyślnie `x86-64-v3` |
 | `FORCE=1` | przebuduj ffmpeg i narzędzia mimo cache |
 | `DOCKER=podman` | Podman zamiast Dockera |

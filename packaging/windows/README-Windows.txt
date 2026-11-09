@@ -5,7 +5,8 @@ Uruchamianie
   Rozpakuj cały folder w dowolnym miejscu i uruchom videopipeline.exe
   (dwuklik otwiera okno konsoli). Najlepiej wygląda w Windows Terminal.
   Wszystkie pliki muszą zostać w jednym folderze: program używa dołączonych
-  ffmpeg.exe, ffprobe.exe, mkvmerge.exe, dovi_tool.exe i hdr10plus_tool.exe.
+  ffmpeg.exe, ffprobe.exe, mkvmerge.exe, MediaInfo.exe, dovi_tool.exe,
+  hdr10plus_tool.exe i mpv.exe (odtwarzanie pod F3).
 
   Tryb skryptowy (PowerShell / cmd):
     .\videopipeline.exe film.mkv D:\Filmy\
@@ -23,6 +24,7 @@ Uwagi
   - Pliki nie są podpisane cyfrowo — SmartScreen może poprosić o potwierdzenie
     („Więcej informacji” → „Uruchom mimo to”).
   - Domyślny katalog wyników: %USERPROFILE%\Videos (zmiana w F7).
+  - F3 otwiera plik w dołączonym mpv w osobnym oknie (q zamyka odtwarzacz).
   - W lewym panelu, w katalogu głównym dysku, widać pozostałe dyski (C:, D: …).
 
 Licencja: GNU GPL v3 (LICENSE.txt). Licencje dołączonych programów: THIRD-PARTY-NOTICES.md.

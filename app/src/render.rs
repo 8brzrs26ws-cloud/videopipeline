@@ -429,7 +429,7 @@ fn render_status(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_fkeys(f: &mut Frame, area: Rect) {
-    let labels = ["Pomoc", "Info", "", "Nazwa", "Dodaj", "Kasuj", "Opcje", "Z kolejki", "Koduj", "Wyjście"];
+    let labels = ["Pomoc", "Info", "Odtwórz", "Nazwa", "Dodaj", "Kasuj", "Opcje", "Z kolejki", "Koduj", "Wyjście"];
     let total = area.width as usize;
     let cell = total / 10;
     let mut spans: Vec<Span<'static>> = vec![];
@@ -517,7 +517,7 @@ fn render_options(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_help(f: &mut Frame, area: Rect) {
-    let rect = centered(area, 68, 26);
+    let rect = centered(area, 68, 27);
     f.render_widget(Clear, rect);
     let block = dialog_block("Pomoc", BOX_ALL);
     let inner = block.inner(rect);
@@ -538,6 +538,7 @@ fn render_help(f: &mut Frame, area: Rect) {
         k("Enter", "katalog: wejdź · plik: dodaj do kolejki"),
         k("Backspace", "katalog wyżej"),
         k("F2", "informacje o pliku (MediaInfo); prawy przycisk myszy też"),
+        k("F3", "odtwórz plik w mpv (wymaga środowiska graficznego)"),
         k("F4", "zmień nazwę pliku/katalogu (lewy panel)"),
         k("F5", "dodaj zaznaczone (lub bieżący) do kolejki"),
         k("F6", "usuń zaznaczone pliki/katalogi z dysku (lewy panel)"),

@@ -533,6 +533,7 @@ impl App {
             KeyCode::Char(c @ ('+' | '-' | '*')) => self.marks(c),
             KeyCode::F(1) => self.mode = Mode::Help,
             KeyCode::F(2) => self.begin_mediainfo(),
+            KeyCode::F(3) => self.play_selected(),
             KeyCode::F(4) => self.begin_rename(),
             KeyCode::F(5) => self.add_from_left(),
             KeyCode::F(6) => self.begin_delete(),
@@ -550,6 +551,21 @@ impl App {
     /// Czy zaznaczona nazwa jest właśnie przewijana (ustawiane przy rysowaniu).
     pub fn marquee_active(&self) -> bool {
         !self.marquee.key.is_empty()
+    }
+
+    /// F3: odtwórz bieżący plik (lewy panel) albo pozycję kolejki (prawy panel) w mpv.
+    fn play_selected(&mut self) {
+        let path = match self.focus {
+            Focus::Left => self.browser.selected().filter(|e| !e.is_dir && !e.is_up).map(|e| e.path.clone()),
+            Focus::Right => self.queue.state.selected().and_then(|i| self.queue.items.get(i)).map(|q| q.path.clone()),
+        };
+        let Some(path) = path else {
+            self.status_msg = "F3 odtwarza plik w mpv — wybierz plik (nie katalog)".into();
+            return;
+        };
+        self.status_msg = match crate::player::play(&path) {
+            Ok(m) | Err(m) => m,
+        };
     }
 
     // ------------------------------------------------------------ MediaInfo (F2) ---

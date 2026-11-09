@@ -22,6 +22,8 @@ DAV1D_REF="${DAV1D_REF:-latest}"
 LIBVPL_REF="${LIBVPL_REF:-latest}"
 MKVTOOLNIX_VERSION="${MKVTOOLNIX_VERSION:-latest}"
 MEDIAINFO_VERSION="${MEDIAINFO_VERSION:-latest}"
+# mpv (F3): gotowa kompilacja shinchiro/mpv-winbuild-cmake (tag = data, np. 20261108); "latest" = najnowsza.
+MPV_WIN_TAG="${MPV_WIN_TAG:-latest}"
 NVCODEC_HEADERS_REF="${NVCODEC_HEADERS_REF:-}"
 TARGET_CPU="${TARGET_CPU:-x86-64-v3}"
 JOBS="${JOBS:-$(nproc)}"
@@ -109,7 +111,19 @@ mediainfo_latest() {
     echo "$v"
 }
 resolve MEDIAINFO_VERSION "github.com/MediaArea/MediaInfo" mediainfo_latest
-echo "Wersje: ffmpeg $FFMPEG_VERSION, dav1d $DAV1D_REF, libvpl $LIBVPL_REF, MKVToolNix $MKVTOOLNIX_VERSION, MediaInfo $MEDIAINFO_VERSION," \
+# mpv dla Windows: najnowsze wydanie shinchiro (API GitHuba), zapasowo wersja pobrana wcześniej do cache.
+mpv_win_latest() {
+    local v; v="$({ wget -qO- --timeout=20 --tries=2 https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest || true; } \
+        | { grep -oE '"tag_name": *"[^"]+"' || true; } | head -n1 | sed -E 's/.*"([^"]+)"$/\1/')"
+    [[ -n "$v" ]] || v="$(latest_git_tag https://github.com/shinchiro/mpv-winbuild-cmake.git)"
+    if [[ -z "$v" ]]; then
+        v="$(ls -1d "$CACHE"/mpv-win-* 2>/dev/null | sed 's|.*/mpv-win-||' | sort -V | tail -n1)"
+        [[ -n "$v" ]] && echo "UWAGA: GitHub niedostępny — używam pobranego wcześniej mpv $v" >&2
+    fi
+    echo "$v"
+}
+resolve MPV_WIN_TAG "github.com/shinchiro/mpv-winbuild-cmake" mpv_win_latest
+echo "Wersje: ffmpeg $FFMPEG_VERSION, dav1d $DAV1D_REF, libvpl $LIBVPL_REF, MKVToolNix $MKVTOOLNIX_VERSION, MediaInfo $MEDIAINFO_VERSION, mpv $MPV_WIN_TAG," \
      "dovi_tool $DOVI_TOOL_REF, hdr10plus_tool $HDR10PLUS_TOOL_REF"
 
 export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER="$TRIPLE-gcc"
@@ -266,6 +280,24 @@ if ! compgen -G "$MI/*.exe" >/dev/null; then
     compgen -G "$MI/*.exe" >/dev/null || fail "w archiwum MediaInfo CLI brak pliku .exe"
 fi
 
+# mpv (odtwarzacz pod F3). Kompilacja skrośna mpv z zależnościami (libplacebo, libass, ANGLE/Vulkan…)
+# jest bardzo ciężka, więc — jak MKVToolNix — bierzemy gotowy, statycznie zlinkowany build
+# shinchiro/mpv-winbuild-cmake w wariancie x86-64-v3 (Linux: mpv kompilowany ze źródeł).
+MPVW="$CACHE/mpv-win-$MPV_WIN_TAG"
+if [[ ! -f "$MPVW/mpv.exe" ]]; then
+    REL="$WORK/mpv-release.json"
+    wget -qO "$REL" "https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/tags/$MPV_WIN_TAG" \
+        || fail "nie udało się pobrać listy plików mpv $MPV_WIN_TAG z GitHuba"
+    URL="$({ grep -oE '"browser_download_url": *"[^"]+/mpv-x86_64-v3-[^"/]+\.7z"' "$REL" || true; } \
+        | grep -v -- '-dev-' | head -n1 | sed -E 's/.*"([^"]+)"$/\1/')"
+    [[ -n "$URL" ]] || fail "w wydaniu mpv $MPV_WIN_TAG brak archiwum mpv-x86_64-v3-*.7z"
+    ARCHIVE="$WORK/$(basename "$URL")"
+    wget -nv -O "$ARCHIVE" "$URL" || fail "nie udało się pobrać $URL"
+    rm -rf "$MPVW" && mkdir -p "$MPVW"
+    "$SEVENZ" x -y -o"$MPVW" "$ARCHIVE" >/dev/null
+    [[ -f "$MPVW/mpv.exe" ]] || fail "w archiwum mpv brak mpv.exe"
+fi
+
 # ------------------------------------------------------------------ 6. pakiet .zip
 log "6/6 składanie $PKGNAME.zip"
 rm -rf "$PKG" && mkdir -p "$PKG"
@@ -279,12 +311,17 @@ cp "$MI"/*.exe "$PKG/"
 for d in "$MI"/*.dll "$MI"/*.DLL; do
     if [[ -f "$d" ]]; then cp "$d" "$PKG/"; fi
 done
+# mpv.exe (+ ewentualne DLL z paczki); program szuka mpv najpierw obok videopipeline.exe.
+cp "$MPVW/mpv.exe" "$PKG/"
+for d in "$MPVW"/*.dll; do
+    if [[ -f "$d" ]]; then cp "$d" "$PKG/"; fi
+done
 # Dane mkvmerge (baza typów plików itp.), jeśli są w wersji przenośnej.
 [[ -d "$MKV/mkvtoolnix/data" ]] && cp -r "$MKV/mkvtoolnix/data" "$PKG/"
 "$TRIPLE-strip" "$PKG/ffmpeg.exe" "$PKG/ffprobe.exe" "$PKG/dovi_tool.exe" "$PKG/hdr10plus_tool.exe" 2>/dev/null || true
 
 # Zależności DLL: wszystko poza bibliotekami systemu Windows musi leżeć w pakiecie.
-SYSTEM_DLL='^(kernel32|kernelbase|user32|advapi32|shell32|shlwapi|ole32|oleaut32|gdi32|ws2_32|bcrypt|bcryptprimitives|secur32|crypt32|ncrypt|ntdll|msvcrt|ucrtbase|api-ms-win-.*|ext-ms-win-.*|comdlg32|comctl32|winmm|psapi|setupapi|cfgmgr32|dxgi|d3d9|d3d11|d3d12|dxva2|mfplat|mf|mfreadwrite|evr|version|userenv|iphlpapi|dbghelp|imm32|pdh|powrprof|normaliz|wldap32|rpcrt4|winhttp|wininet|uxtheme|dwmapi|opengl32|mpr|netapi32|avrt|mscms|propsys|synchronization|winspool\.drv|avicap32|msvfw32|msacm32|ksuser|shcore|dwrite|d2d1|d3dcompiler_47|mfcore|mfuuid|cryptbase|wintrust|hid|xinput1_4|dsound|dinput8)\.dll$'
+SYSTEM_DLL='^(kernel32|kernelbase|user32|advapi32|shell32|shlwapi|ole32|oleaut32|gdi32|ws2_32|bcrypt|bcryptprimitives|secur32|crypt32|ncrypt|ntdll|msvcrt|ucrtbase|api-ms-win-.*|ext-ms-win-.*|comdlg32|comctl32|winmm|psapi|setupapi|cfgmgr32|dxgi|d3d9|d3d11|d3d12|dxva2|mfplat|mf|mfreadwrite|evr|version|userenv|iphlpapi|dbghelp|imm32|pdh|powrprof|normaliz|wldap32|rpcrt4|winhttp|wininet|uxtheme|dwmapi|opengl32|mpr|netapi32|avrt|mscms|propsys|synchronization|winspool\.drv|avicap32|msvfw32|msacm32|ksuser|shcore|dwrite|d2d1|d3dcompiler_47|mfcore|mfuuid|cryptbase|wintrust|hid|xinput1_4|dsound|dinput8|vulkan-1|d3dcompiler_43)\.dll$'
 MINGW_DIRS=(/usr/lib/gcc/$TRIPLE/*-posix "/usr/$TRIPLE/lib")
 changed=1
 while [[ $changed = 1 ]]; do

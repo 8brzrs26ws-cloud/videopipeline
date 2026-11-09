@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Buduje dist/VideoPipeline-<wersja>-x86_64_v3.AppImage z dołączonymi narzędziami:
 #   ffmpeg + ffprobe (NVENC/NVDEC/CUDA-LLVM statycznie; Intel QSV/VAAPI z libva/libvpl linkowanymi dynamicznie),
-#   mkvmerge, mediainfo, dovi_tool, hdr10plus_tool.
+#   mkvmerge, mediainfo, dovi_tool, hdr10plus_tool oraz odtwarzacz mpv (F3, budowany ze źródeł; MPV_VERSION).
 # Kod własny (videopipeline, biblioteka core, dovi_tool, hdr10plus_tool, ffmpeg) jest kompilowany
 # z -march/-C target-cpu=x86-64-v3. Sterowniki NVIDIA pochodzą z hosta i NIE są dołączane.
 #
@@ -23,6 +23,8 @@ NVCODEC_HEADERS_REF="${NVCODEC_HEADERS_REF:-}"
 # dovi_tool i hdr10plus_tool nie są na crates.io (tylko biblioteki dolby_vision/hdr10plus) — budujemy z GitHuba, z tagów.
 DOVI_TOOL_REF="${DOVI_TOOL_REF:-2.3.4}"
 HDR10PLUS_TOOL_REF="${HDR10PLUS_TOOL_REF:-1.7.2}"
+# Odtwarzacz mpv (F3) — budowany ze źródeł (tag vX.Y.Z z github.com/mpv-player/mpv); "latest" = najnowsze wydanie.
+MPV_VERSION="${MPV_VERSION:-latest}"
 TARGET_CPU="${TARGET_CPU:-x86-64-v3}"
 INTEL="${INTEL:-auto}"
 JOBS="${JOBS:-$(nproc)}"
@@ -55,7 +57,7 @@ fi
 [[ "$HDR10PLUS_TOOL_REF" = latest ]] && HDR10PLUS_TOOL_REF="$(latest_git_tag https://github.com/quietvoid/hdr10plus_tool)"
 echo "Wersje: ffmpeg $FFMPEG_VERSION, dovi_tool $DOVI_TOOL_REF, hdr10plus_tool $HDR10PLUS_TOOL_REF"
 
-for c in cargo rustc gcc clang make nasm pkg-config git wget patchelf mkvmerge mediainfo; do need "$c"; done
+for c in cargo rustc gcc clang make nasm pkg-config git wget patchelf mkvmerge mediainfo meson ninja; do need "$c"; done
 pkg-config --exists dav1d || fail "brak libdav1d-dev (pkg-config dav1d)"
 
 # --------------------------------------------------------------------------- 1. aplikacja
@@ -172,6 +174,30 @@ if [[ "$USE_INTEL" = 1 || "$FFPREFIX" == *-intel ]]; then
 fi
 "$FFMPEG" -hide_banner -version | sed -n 1p
 
+# --------------------------------------------------------------------------- 3b. mpv
+# Budowany ze źródeł z bibliotekami Debiana (libplacebo, libass, libav* z systemu kontenera) —
+# linuxdeploy dołączy je do paczki. Sterowniki grafiki (GL/EGL/Vulkan), X11/Wayland i ALSA są z hosta.
+if [[ "$MPV_VERSION" = latest ]]; then
+    MPV_VERSION="$({ GIT_TERMINAL_PROMPT=0 timeout 60 git ls-remote --tags --refs https://github.com/mpv-player/mpv.git 2>/dev/null || true; } \
+        | sed 's|.*refs/tags/||' | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } | sed 's/^v//' | sort -V | tail -n1)"
+    if [[ -z "$MPV_VERSION" ]]; then
+        MPV_VERSION="$(ls -1d "$CACHE"/mpv-* 2>/dev/null | sed 's|.*/mpv-||' | sort -V | tail -n1)"
+    fi
+    [[ -n "$MPV_VERSION" ]] || fail "nie udało się ustalić wersji mpv — podaj MPV_VERSION=..."
+fi
+log "3b/5 mpv $MPV_VERSION (ze źródeł, $TARGET_CPU)"
+MPVPREFIX="$CACHE/mpv-$MPV_VERSION"
+if [[ "$FORCE" = 1 || ! -x "$MPVPREFIX/bin/mpv" ]]; then
+    rm -rf "$WORK/mpv" "$MPVPREFIX"
+    git clone --quiet --depth 1 --branch "v$MPV_VERSION" https://github.com/mpv-player/mpv.git "$WORK/mpv"
+    meson setup "$WORK/mpv/build" "$WORK/mpv" --prefix="$MPVPREFIX" --buildtype=release \
+        -Dlibmpv=false -Dcplayer=true -Dc_args="-march=$TARGET_CPU"
+    meson compile -C "$WORK/mpv/build" -j "$JOBS"
+    meson install -C "$WORK/mpv/build" >/dev/null
+fi
+[[ -x "$MPVPREFIX/bin/mpv" ]] || fail "brak $MPVPREFIX/bin/mpv"
+"$MPVPREFIX/bin/mpv" --no-config --version | sed -n 1p
+
 # --------------------------------------------------------------------------- 4. AppDir
 log "4/5 składanie AppDir"
 rm -rf "$APPDIR"
@@ -191,6 +217,7 @@ install -m755 "$FFPREFIX/bin/ffmpeg" "$FFPREFIX/bin/ffprobe" "$APPDIR/usr/bin/"
 install -m755 "$TOOLS/bin/dovi_tool" "$TOOLS/bin/hdr10plus_tool" "$APPDIR/usr/bin/"
 install -m755 "$(command -v mkvmerge)" "$APPDIR/usr/bin/"
 install -m755 "$(command -v mediainfo)" "$APPDIR/usr/bin/"
+install -m755 "$MPVPREFIX/bin/mpv" "$APPDIR/usr/bin/"
 for m in /usr/lib/file/magic.mgc /usr/share/misc/magic.mgc; do
     if [[ -f "$m" ]]; then cp -L "$m" "$APPDIR/usr/share/misc/magic.mgc"; break; fi
 done
@@ -238,6 +265,7 @@ export LINUXDEPLOY_OUTPUT_VERSION="$VERSION"
         --executable "$APPDIR/usr/bin/videopipeline" \
         --executable "$APPDIR/usr/bin/mkvmerge" \
         --executable "$APPDIR/usr/bin/mediainfo" \
+        --executable "$APPDIR/usr/bin/mpv" \
         --executable "$APPDIR/usr/bin/ffmpeg" \
         --executable "$APPDIR/usr/bin/ffprobe" \
         --executable "$APPDIR/usr/bin/dovi_tool" \
