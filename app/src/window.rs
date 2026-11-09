@@ -143,8 +143,9 @@ pub mod kde {
     };
 
     const GROUP: &str = "videopipeline-taskbar-icon";
-    /// Tytuł okna Konsole to „<tytuł karty> — Konsole”.
-    const TITLE_RE: &str = "^VideoPipeline( [—–-] Konsole)?$";
+    /// Tytuł okna Konsole to „<tytuł karty> — Konsole”, a nazwa programu jest tłumaczona
+    /// (np. „— Konsola” po polsku) — dowolna końcówka; reguła i tak dotyczy tylko okien Konsole (wmclass).
+    const TITLE_RE: &str = "^VideoPipeline( [—–-] .+)?$";
     const KEYS: &[(&str, &str)] = &[
         ("Description", "VideoPipeline: ikona na pasku zadań (Konsole)"),
         ("desktopfile", "videopipeline"),
