@@ -512,7 +512,7 @@ fn render_options(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_help(f: &mut Frame, area: Rect) {
-    let rect = centered(area, 68, 25);
+    let rect = centered(area, 68, 26);
     f.render_widget(Clear, rect);
     let block = dialog_block("Pomoc", BOX_ALL);
     let inner = block.inner(rect);
@@ -539,6 +539,7 @@ fn render_help(f: &mut Frame, area: Rect) {
         k("F7", "opcje: kodek i karta (NVENC/QSV/VAAPI), audio, analizy…"),
         k("F8 / Del", "usuń zaznaczone (lub bieżący) z kolejki"),
         k("F9", "uruchom kodowanie"),
+        k("Ctrl+L", "przerysuj ekran"),
         k("F10 / Ctrl+C", "wyjście"),
         Line::default(),
         Line::from(Span::styled(" Katalog jako cel F5 dodaje wszystkie filmy z niego.", fg(DIM))),

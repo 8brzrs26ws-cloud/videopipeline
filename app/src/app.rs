@@ -221,6 +221,8 @@ pub struct App {
     last_click: Option<(Focus, usize, Instant)>,
     /// Przewijanie długiej nazwy zaznaczonego pliku
     pub marquee: Marquee,
+    /// Ctrl+L: wymuś pełne przerysowanie ekranu
+    pub force_redraw: bool,
 }
 
 impl App {
@@ -249,6 +251,7 @@ impl App {
             ui: UiRects::default(),
             last_click: None,
             marquee: Marquee { key: String::new(), since: Instant::now() },
+            force_redraw: false,
         };
         if !initial.is_empty() {
             app.add_paths(initial);
@@ -431,6 +434,11 @@ impl App {
         self.status_msg.clear();
         if k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('c') {
             self.request_quit();
+            return;
+        }
+        // Ctrl+L — przerysuj ekran (jak w Midnight Commanderze).
+        if k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('l') {
+            self.force_redraw = true;
             return;
         }
         match self.mode {
@@ -934,8 +942,17 @@ pub fn run(app: &mut App) -> Result<()> {
 
 fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
     let mut last_tick = Instant::now();
+    let mut last_mode = app.mode;
     while !app.quit {
         app.poll_run();
+        // Zamknięcie okienka (F2, F4, F6, F7, F9…) albo Ctrl+L: pełne przerysowanie ekranu.
+        // Część terminali (np. Konsole/Yakuake) potrafi zostawić resztki okna, gdy ratatui
+        // odświeża tylko zmienione komórki — czyszczenie wymusza narysowanie wszystkiego od nowa.
+        if app.mode != last_mode || app.force_redraw {
+            terminal.clear()?;
+            app.force_redraw = false;
+            last_mode = app.mode;
+        }
         terminal.draw(|f| render::draw(f, app))?;
 
         // Krótszy odstęp, gdy przewija się długa nazwa (płynniejszy ruch tekstu).

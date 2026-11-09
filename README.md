@@ -81,6 +81,7 @@ po lewej pliki, po prawej kolejkę kodowania.
 | F8 / Del | wyjmij z kolejki (plik zostaje na dysku) |
 | F9 | koduj (Esc przerywa) |
 | F10, Ctrl+C | wyjście |
+| Ctrl+L | przerysuj ekran (gdy terminal zostawi resztki okna) |
 | Mysz | klik — kursor i zaznaczenie pliku; podwójny klik — zaznaczone + kliknięty plik do kolejki (na katalogu: wejście); prawy klik — MediaInfo; kółko — przewijanie; klik na pasku F1–F10 — klawisz. Zaznaczanie tekstu w terminalu: z wciśniętym Shift |
 
 Długa nazwa zaznaczonego pliku, która nie mieści się w kolumnie, przewija się sama, więc da się ją przeczytać
