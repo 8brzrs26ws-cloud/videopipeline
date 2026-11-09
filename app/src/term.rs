@@ -26,7 +26,7 @@ fn in_path(name: &str) -> bool {
 /// (program, argumenty poprzedzające polecenie). Kolejność: KDE najpierw.
 /// Okno dostaje tytuł „VideoPipeline”, a gdzie terminal na to pozwala — klasę / app-id
 /// „videopipeline”, więc pasek zadań dopasuje je do videopipeline.desktop (ikona programu).
-/// Konsole nie pozwala zmienić app-id: tytuł karty „VideoPipeline” + reguła KWin (window.rs).
+/// Konsole nie pozwala zmienić app-id (pasek zadań KDE pokaże ikonę Konsole) — tylko tytuł karty.
 #[cfg(not(windows))]
 const TERMINALS: &[(&str, &[&str])] = &[
     ("konsole", &["-p", "LocalTabTitleFormat=VideoPipeline", "-p", "RemoteTabTitleFormat=VideoPipeline", "-e"]),
@@ -81,7 +81,14 @@ pub fn relaunch_in_terminal() -> Option<i32> {
     if let Ok(t) = env::var("VIDEOPIPELINE_TERMINAL") {
         let mut it = t.split_whitespace().map(String::from);
         if let Some(prog) = it.next() {
-            candidates.push((prog, it.collect()));
+            let mut pre: Vec<String> = it.collect();
+            // Sama nazwa znanego terminala: jego argumenty (tytuł, klasa okna) z listy poniżej.
+            if pre.is_empty() {
+                if let Some((_, p)) = TERMINALS.iter().find(|(n, _)| *n == prog) {
+                    pre = p.iter().map(|s| s.to_string()).collect();
+                }
+            }
+            candidates.push((prog, pre));
         }
     }
     for (prog, pre) in TERMINALS {

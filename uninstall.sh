@@ -19,13 +19,6 @@ rm_if() {
     done
 }
 
-# Reguła okna KWin (ikona na pasku zadań KDE) — usuwa ją sam program, zanim zniknie.
-if [[ -x "$PREFIX/bin/videopipeline" ]]; then
-    "$PREFIX/bin/videopipeline" --kde-icon off 2>/dev/null | grep -F "Usunięto" || true
-    rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/videopipeline/no-kde-taskbar-rule"
-    rmdir "${XDG_CONFIG_HOME:-$HOME/.config}/videopipeline" 2>/dev/null || true
-fi
-
 rm_if "$PREFIX/bin/videopipeline" "$PREFIX/bin/libvideopipeline_core.so"
 # libstd Rusta kopiowana przez install.sh obok binarki — tylko gdy nic innego z Rusta jej tam nie używa.
 shopt -s nullglob
