@@ -201,6 +201,7 @@ Zmienne dla `build-local.sh`:
 | `INTEL` | Linux: `auto` (domyślnie), `1` — wymagaj QSV/VAAPI, `0` — bez Intela |
 | `DAV1D_REF`, `LIBVPL_REF`, `MKVTOOLNIX_VERSION`, `MEDIAINFO_VERSION` | Windows: wersje bibliotek, MKVToolNix i MediaInfo, domyślnie `latest` |
 | `MPV_VERSION` | Linux: wersja mpv budowanego ze źródeł (np. `0.41.0`), domyślnie `latest` |
+| `LIBPLACEBO_REF` | Linux: wersja libplacebo budowanej razem z mpv, domyślnie `latest` (najnowsza zgodna z wymaganiem mpv) |
 | `MPV_WIN_TAG` | Windows: tag wydania shinchiro (data, np. `20261108`), domyślnie `latest` |
 | `TARGET_CPU` | domyślnie `x86-64-v3` |
 | `FORCE=1` | przebuduj ffmpeg i narzędzia mimo cache |

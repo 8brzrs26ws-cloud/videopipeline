@@ -175,8 +175,11 @@ fi
 "$FFMPEG" -hide_banner -version | sed -n 1p
 
 # --------------------------------------------------------------------------- 3b. mpv
-# Budowany ze źródeł z bibliotekami Debiana (libplacebo, libass, libav* z systemu kontenera) —
-# linuxdeploy dołączy je do paczki. Sterowniki grafiki (GL/EGL/Vulkan), X11/Wayland i ALSA są z hosta.
+# Budowany ze źródeł z bibliotekami Debiana (libass, libav*, Lua… z systemu kontenera) — linuxdeploy
+# dołączy je do paczki. libplacebo z Debiana bywa za stara dla nowego mpv, więc jest budowana razem
+# z mpv jako podprojekt meson (statycznie; LIBPLACEBO_REF, domyślnie najnowszy tag tej samej
+# wersji głównej, co wymagana przez mpv). Sterowniki grafiki (GL/EGL/Vulkan), X11/Wayland i ALSA są z hosta.
+LIBPLACEBO_REF="${LIBPLACEBO_REF:-latest}"
 if [[ "$MPV_VERSION" = latest ]]; then
     MPV_VERSION="$({ GIT_TERMINAL_PROMPT=0 timeout 60 git ls-remote --tags --refs https://github.com/mpv-player/mpv.git 2>/dev/null || true; } \
         | sed 's|.*refs/tags/||' | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } | sed 's/^v//' | sort -V | tail -n1)"
@@ -189,8 +192,24 @@ log "3b/5 mpv $MPV_VERSION (ze źródeł, $TARGET_CPU)"
 MPVPREFIX="$CACHE/mpv-$MPV_VERSION"
 if [[ "$FORCE" = 1 || ! -x "$MPVPREFIX/bin/mpv" ]]; then
     rm -rf "$WORK/mpv" "$MPVPREFIX"
-    git clone --quiet --depth 1 --branch "v$MPV_VERSION" https://github.com/mpv-player/mpv.git "$WORK/mpv"
+    git -c advice.detachedHead=false clone --quiet --depth 1 --branch "v$MPV_VERSION" \
+        https://github.com/mpv-player/mpv.git "$WORK/mpv"
+    if [[ "$LIBPLACEBO_REF" = latest ]]; then
+        # Wymagana wersja z meson.build mpv, np. ">=7.387.0" → najnowszy tag v7.x.y.
+        need_pl="$(grep -oE "libplacebo', *version: *'>= *[0-9.]+" "$WORK/mpv/meson.build" | grep -oE '[0-9]+(\.[0-9]+)+$' || true)"
+        pl_major="${need_pl%%.*}"
+        LIBPLACEBO_REF="$({ GIT_TERMINAL_PROMPT=0 timeout 60 git ls-remote --tags --refs https://github.com/haasn/libplacebo.git 2>/dev/null || true; } \
+            | sed 's|.*refs/tags/||' | { grep -E "^v${pl_major:-[0-9]+}\.[0-9]+\.[0-9]+\$" || true; } | sed 's/^v//' | sort -V | tail -n1)"
+        [[ -n "$LIBPLACEBO_REF" ]] || fail "nie udało się ustalić wersji libplacebo (mpv wymaga ${need_pl:-?}) — podaj LIBPLACEBO_REF=..."
+        echo "libplacebo $LIBPLACEBO_REF (mpv wymaga >= ${need_pl:-?})"
+    fi
+    git -c advice.detachedHead=false clone --quiet --depth 1 --branch "v$LIBPLACEBO_REF" \
+        --recurse-submodules --shallow-submodules \
+        https://github.com/haasn/libplacebo.git "$WORK/mpv/subprojects/libplacebo"
     meson setup "$WORK/mpv/build" "$WORK/mpv" --prefix="$MPVPREFIX" --buildtype=release \
+        --force-fallback-for=libplacebo \
+        -Dlibplacebo:demos=false -Dlibplacebo:tests=false -Dlibplacebo:vulkan=enabled \
+        -Dlibplacebo:opengl=enabled -Dlibplacebo:shaderc=enabled -Dlibplacebo:lcms=enabled \
         -Dlibmpv=false -Dcplayer=true -Dc_args="-march=$TARGET_CPU"
     meson compile -C "$WORK/mpv/build" -j "$JOBS"
     meson install -C "$WORK/mpv/build" >/dev/null
