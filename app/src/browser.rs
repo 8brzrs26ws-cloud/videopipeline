@@ -368,10 +368,11 @@ impl Queue {
         self.items.iter().map(|q| q.size).sum()
     }
 
-    /// Usuwa z kolejki podane ścieżki (np. pliki skasowane z dysku).
+    /// Usuwa z kolejki podane ścieżki (pliki skasowane z dysku) oraz wszystko, co leżało w usuniętych katalogach.
     pub fn remove_paths(&mut self, paths: &[PathBuf]) {
-        self.items.retain(|q| !paths.contains(&q.path));
-        self.marked.retain(|p| !paths.contains(p));
+        let gone = |p: &std::path::Path| paths.iter().any(|d| p.starts_with(d));
+        self.items.retain(|q| !gone(&q.path));
+        self.marked.retain(|p| !gone(p));
         self.clamp_selection();
     }
 

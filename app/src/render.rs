@@ -210,7 +210,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             render_run(f, area, app);
             render_confirm(f, area, "Kodowanie trwa. Przerwać i wyjść?");
         }
-        Mode::ConfirmDelete => render_delete(f, area, &app.pending_delete),
+        Mode::ConfirmDelete => render_delete(f, area, &app.pending_delete, &app.pending_delete_info),
         Mode::Rename => {
             if let Some(r) = &app.rename {
                 render_rename(f, area, r);
@@ -535,7 +535,7 @@ fn render_help(f: &mut Frame, area: Rect) {
         k("F2", "informacje o pliku (MediaInfo); prawy przycisk myszy też"),
         k("F4", "zmień nazwę pliku/katalogu (lewy panel)"),
         k("F5", "dodaj zaznaczone (lub bieżący) do kolejki"),
-        k("F6", "usuń zaznaczone pliki z dysku (lewy panel)"),
+        k("F6", "usuń zaznaczone pliki/katalogi z dysku (lewy panel)"),
         k("F7", "opcje: kodek i karta (NVENC/QSV/VAAPI), audio, analizy…"),
         k("F8 / Del", "usuń zaznaczone (lub bieżący) z kolejki"),
         k("F9", "uruchom kodowanie"),
@@ -548,29 +548,52 @@ fn render_help(f: &mut Frame, area: Rect) {
 }
 
 /// F6: potwierdzenie usunięcia plików z dysku (lista do 5 nazw).
-fn render_delete(f: &mut Frame, area: Rect, files: &[std::path::PathBuf]) {
+fn render_delete(f: &mut Frame, area: Rect, files: &[std::path::PathBuf], info: &crate::app::DeleteInfo) {
     let shown = files.len().min(5);
-    let h = 7 + shown as u16 + u16::from(files.len() > shown);
-    let rect = centered(area, 64, h);
+    let warn_lines: u16 = if info.dirs > 0 { 3 } else { 0 };
+    let h = 7 + warn_lines + shown as u16 + u16::from(files.len() > shown);
+    let rect = centered(area, 72, h);
     f.render_widget(Clear, rect);
     let block = dialog_block("Usuń z dysku", BOX_ERR);
     let inner = block.inner(rect);
     f.render_widget(block, rect);
     let w = inner.width as usize;
+    let n_files = files.len() - info.dirs;
+    let what = match (n_files, info.dirs) {
+        (0, d) => format!("katalogów: {d}"),
+        (n, 0) => format!("plików: {n}"),
+        (n, d) => format!("plików: {n} i katalogów: {d}"),
+    };
     let mut lines = vec![
         Line::default(),
-        Line::from(Span::styled(format!("Usunąć z dysku plików: {}?", files.len()), bold(TITLE))),
-        Line::from(Span::styled("Tej operacji nie można cofnąć.", fg(G_HIGH))),
-        Line::default(),
+        Line::from(Span::styled(format!("Usunąć z dysku {what}?"), bold(TITLE))),
+        Line::from(Span::styled("Tej operacji nie można cofnąć — pliki nie trafiają do kosza.", fg(G_HIGH))),
     ];
+    if info.dirs > 0 {
+        let more = if info.truncated { "ponad " } else { "" };
+        lines.push(Line::default());
+        lines.push(Line::from(Span::styled(
+            "UWAGA: katalogi zostaną usunięte RAZEM Z CAŁĄ ZAWARTOŚCIĄ",
+            bold(G_HIGH),
+        )));
+        lines.push(Line::from(Span::styled(
+            format!("(w środku {more}{} plików, {more}{})", info.inner_files, human(info.inner_bytes)),
+            fg(G_HIGH),
+        )));
+    }
+    lines.push(Line::default());
     for p in files.iter().take(shown) {
-        let n = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        let mut n = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        if std::fs::symlink_metadata(p).map(|m| m.is_dir()).unwrap_or(false) {
+            n = format!("/{n}");
+        }
         lines.push(Line::from(Span::styled(trunc(&n, w.saturating_sub(2)), fg(TEXT))));
     }
     if files.len() > shown {
         lines.push(Line::from(Span::styled(format!("… i {} więcej", files.len() - shown), fg(DIM))));
     }
-    lines.push(Line::from(Span::styled("[T]ak / [N]ie", fg(G_MID))));
+    let keys = if info.dirs > 0 { "[T]ak — usuń razem z zawartością / [N]ie" } else { "[T]ak / [N]ie" };
+    lines.push(Line::from(Span::styled(keys, fg(G_MID))));
     f.render_widget(Paragraph::new(lines).alignment(Alignment::Center), inner);
 }
 

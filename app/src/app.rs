@@ -25,7 +25,7 @@ use ratatui::{
     DefaultTerminal,
 };
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
     thread::JoinHandle,
     time::{Duration, Instant},
@@ -75,6 +75,52 @@ pub struct UiRects {
 pub struct Marquee {
     pub key: String,
     pub since: Instant,
+}
+
+/// F6: ile katalogów jest wśród usuwanych pozycji i co w nich jest.
+#[derive(Default, Clone, Copy)]
+pub struct DeleteInfo {
+    pub dirs: usize,
+    /// Pliki wewnątrz katalogów (rekurencyjnie)
+    pub inner_files: u64,
+    /// Łączny rozmiar plików wewnątrz katalogów
+    pub inner_bytes: u64,
+    /// Liczenie przerwane po limicie (bardzo duże drzewo) — liczby są dolną granicą
+    pub truncated: bool,
+}
+
+/// Zlicza pliki i rozmiar w katalogu (bez wchodzenia w dowiązania symboliczne), z limitem wpisów.
+fn tally_dir(dir: &Path, info: &mut DeleteInfo, budget: &mut u32) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    for e in rd.flatten() {
+        if *budget == 0 {
+            info.truncated = true;
+            return;
+        }
+        *budget -= 1;
+        let Ok(md) = std::fs::symlink_metadata(e.path()) else { continue };
+        if md.is_dir() {
+            tally_dir(&e.path(), info, budget);
+        } else {
+            info.inner_files += 1;
+            info.inner_bytes += md.len();
+        }
+    }
+}
+
+/// Katalogi, których F6 nigdy nie usuwa (korzeń systemu, dysku, katalog domowy).
+fn is_protected_dir(p: &Path) -> bool {
+    p.parent().is_none() || videopipeline_core::platform::home_dir().is_some_and(|h| h == p)
+}
+
+/// Usuwa plik, dowiązanie albo katalog z całą zawartością (dowiązania usuwane są jako dowiązania).
+fn remove_entry(p: &Path) -> std::io::Result<()> {
+    let md = std::fs::symlink_metadata(p)?;
+    if md.is_dir() {
+        std::fs::remove_dir_all(p)
+    } else {
+        std::fs::remove_file(p)
+    }
 }
 
 /// Pole tekstowe z kursorem (zmiana nazwy).
@@ -163,6 +209,8 @@ pub struct App {
     pub monitor: Option<Monitor>,
     /// F6: pliki czekające na potwierdzenie usunięcia
     pub pending_delete: Vec<PathBuf>,
+    /// F6: podsumowanie zawartości usuwanych katalogów (do ostrzeżenia)
+    pub pending_delete_info: DeleteInfo,
     /// F4: trwająca zmiana nazwy
     pub rename: Option<RenameCtx>,
     /// F2: okienko MediaInfo
@@ -195,6 +243,7 @@ impl App {
             sys: SysStats::default(),
             monitor: None,
             pending_delete: vec![],
+            pending_delete_info: DeleteInfo::default(),
             rename: None,
             mediainfo: None,
             ui: UiRects::default(),
@@ -626,27 +675,39 @@ impl App {
             return;
         }
         let targets = self.browser.targets();
-        let files: Vec<PathBuf> = targets.iter().filter(|p| p.is_file()).cloned().collect();
-        if files.is_empty() {
-            self.status_msg = if targets.is_empty() {
-                "Nic nie wybrano".into()
-            } else {
-                "Katalogi nie są usuwane — zaznacz pliki".into()
-            };
+        if targets.is_empty() {
+            self.status_msg = "Nic nie wybrano".into();
             return;
         }
-        self.pending_delete = files;
+        if let Some(p) = targets.iter().find(|p| is_protected_dir(p)) {
+            self.status_msg = format!("{} nie zostanie usunięty (katalog główny lub domowy)", p.display());
+            return;
+        }
+        // Katalogi: policz zawartość, żeby ostrzeżenie mówiło, ile naprawdę zniknie.
+        let mut info = DeleteInfo::default();
+        let mut budget: u32 = 200_000;
+        for p in &targets {
+            let is_dir = std::fs::symlink_metadata(p).map(|m| m.is_dir()).unwrap_or(false);
+            if is_dir {
+                info.dirs += 1;
+                tally_dir(p, &mut info, &mut budget);
+            }
+        }
+        self.pending_delete = targets;
+        self.pending_delete_info = info;
         self.mode = Mode::ConfirmDelete;
     }
 
     fn key_confirm_delete(&mut self, k: KeyEvent) {
         match k.code {
+            // Przy katalogach Enter nie wystarcza — trzeba świadomie nacisnąć T.
+            KeyCode::Enter if self.pending_delete_info.dirs > 0 => {}
             KeyCode::Char('y' | 'Y' | 't' | 'T') | KeyCode::Enter => {
                 let files = std::mem::take(&mut self.pending_delete);
                 let mut removed: Vec<PathBuf> = vec![];
                 let mut errors: Vec<String> = vec![];
                 for f in &files {
-                    match std::fs::remove_file(f) {
+                    match remove_entry(f) {
                         Ok(()) => removed.push(f.clone()),
                         Err(e) => errors.push(format!(
                             "{}: {e}",
@@ -655,9 +716,7 @@ impl App {
                     }
                 }
                 self.queue.remove_paths(&removed);
-                for p in &removed {
-                    self.browser.marked.remove(p);
-                }
+                self.browser.marked.retain(|m| !removed.iter().any(|d| m.starts_with(d)));
                 self.browser.reload(None);
                 self.status_msg = match errors.first() {
                     None => format!("Usunięto z dysku: {}", removed.len()),
