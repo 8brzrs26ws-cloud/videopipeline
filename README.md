@@ -76,7 +76,7 @@ po lewej pliki, po prawej kolejkę kodowania.
 | F2 | informacje o pliku (MediaInfo, w stylu widoku „Easy”): kontener, rozmiar, czas, każdy strumień wideo/audio/napisów w jednej linii; ↑↓ przewijanie, Esc zamyka |
 | F4 | zmień nazwę pliku lub katalogu w lewym panelu (kursor stoi przed rozszerzeniem — wygodne dopisanie np. `_v2`) |
 | F5 | dodaj zaznaczone do kolejki (katalog = wszystkie filmy w nim) |
-| F6 | usuń zaznaczone (lub bieżący) pliki i katalogi z dysku w lewym panelu — po potwierdzeniu; przy katalogach okno ostrzega, ile plików i GB zniknie, i wymaga klawisza T (Enter nie wystarcza); katalogu głównego i domowego nie usuwa |
+| F6 | usuń zaznaczone (lub bieżący) pliki i katalogi z dysku w lewym panelu — po potwierdzeniu; przy katalogach okno ostrzega, ile plików i GB zniknie, potwierdzenie: Enter lub T, anulowanie: Esc lub N; katalogu głównego i domowego nie usuwa |
 | F7 | opcje |
 | F8 / Del | wyjmij z kolejki (plik zostaje na dysku) |
 | F9 | koduj (Esc przerywa) |

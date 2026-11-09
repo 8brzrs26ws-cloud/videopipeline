@@ -708,8 +708,6 @@ impl App {
 
     fn key_confirm_delete(&mut self, k: KeyEvent) {
         match k.code {
-            // Przy katalogach Enter nie wystarcza — trzeba świadomie nacisnąć T.
-            KeyCode::Enter if self.pending_delete_info.dirs > 0 => {}
             KeyCode::Char('y' | 'Y' | 't' | 'T') | KeyCode::Enter => {
                 let files = std::mem::take(&mut self.pending_delete);
                 let mut removed: Vec<PathBuf> = vec![];

@@ -593,7 +593,11 @@ fn render_delete(f: &mut Frame, area: Rect, files: &[std::path::PathBuf], info: 
     if files.len() > shown {
         lines.push(Line::from(Span::styled(format!("… i {} więcej", files.len() - shown), fg(DIM))));
     }
-    let keys = if info.dirs > 0 { "[T]ak — usuń razem z zawartością / [N]ie" } else { "[T]ak / [N]ie" };
+    let keys = if info.dirs > 0 {
+        "Enter / [T]ak — usuń razem z zawartością · Esc / [N]ie"
+    } else {
+        "Enter / [T]ak · Esc / [N]ie"
+    };
     lines.push(Line::from(Span::styled(keys, fg(G_MID))));
     f.render_widget(Paragraph::new(lines).alignment(Alignment::Center), inner);
 }
@@ -718,7 +722,7 @@ fn render_confirm(f: &mut Frame, area: Rect, text: &str) {
     let lines = vec![
         Line::default(),
         Line::from(Span::styled(text.to_string(), bold(TITLE))),
-        Line::from(Span::styled("[T]ak / [N]ie", fg(G_MID))),
+        Line::from(Span::styled("Enter / [T]ak · Esc / [N]ie", fg(G_MID))),
     ];
     f.render_widget(Paragraph::new(lines).alignment(Alignment::Center), inner);
 }
