@@ -216,6 +216,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                 render_rename(f, area, r);
             }
         }
+        Mode::Message => {
+            if let Some((title, lines)) = &app.message {
+                render_message(f, area, title, lines);
+            }
+        }
         Mode::MediaInfo => {
             if let Some(v) = app.mediainfo.as_mut() {
                 render_mediainfo(f, area, v);
@@ -684,6 +689,36 @@ fn render_mediainfo(f: &mut Frame, area: Rect, v: &mut crate::app::MediaInfoView
         Paragraph::new(Line::from(Span::styled(format!("Esc / F2 — zamknij{more}"), fg(G_MID)))),
         parts[1],
     );
+}
+
+/// Okienko komunikatu (np. błąd uprawnień przy F6): zawinięte linie, Enter/Esc zamyka.
+fn render_message(f: &mut Frame, area: Rect, title: &str, text: &[String]) {
+    let w = area.width.saturating_sub(4).clamp(40, 100);
+    let inner_w = (w as usize).saturating_sub(4);
+    let mut lines: Vec<Line<'static>> = vec![Line::default()];
+    for (i, l) in text.iter().enumerate() {
+        // Pierwsza linia każdego bloku (po pustej) — pogrubiona.
+        let head = i == 0 || text.get(i.wrapping_sub(1)).is_some_and(|p| p.is_empty());
+        let style = if head { bold(G_HIGH) } else { fg(TEXT) };
+        if l.is_empty() {
+            lines.push(Line::default());
+            continue;
+        }
+        let indent = l.len() - l.trim_start().len();
+        for (n, part) in wrap(l.trim_start(), inner_w.saturating_sub(indent + 1)).into_iter().enumerate() {
+            let pad = if n == 0 { indent } else { indent + 2 };
+            lines.push(Line::from(Span::styled(format!(" {}{part}", " ".repeat(pad)), style)));
+        }
+    }
+    lines.push(Line::default());
+    lines.push(Line::from(Span::styled(" Enter / Esc — zamknij", fg(G_MID))));
+    let h = (lines.len() as u16 + 2).min(area.height.saturating_sub(2));
+    let rect = centered(area, w, h);
+    f.render_widget(Clear, rect);
+    let block = dialog_block(title, BOX_ERR);
+    let inner = block.inner(rect);
+    f.render_widget(block, rect);
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
 /// Zawijanie tekstu po słowach do szerokości `w` (w znakach).

@@ -2,6 +2,7 @@
 mod app;
 mod browser;
 mod cli;
+mod perm;
 mod render;
 mod term;
 mod theme;

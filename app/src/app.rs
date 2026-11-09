@@ -52,6 +52,8 @@ pub enum Mode {
     Rename,
     /// F2: informacje MediaInfo o pliku
     MediaInfo,
+    /// Okienko z komunikatem (np. dlaczego nie da się usunąć pliku)
+    Message,
 }
 
 /// Okienko F2: raport MediaInfo (albo błąd) i przewinięcie.
@@ -223,6 +225,8 @@ pub struct App {
     pub marquee: Marquee,
     /// Ctrl+L: wymuś pełne przerysowanie ekranu
     pub force_redraw: bool,
+    /// Okienko komunikatu: tytuł i linie
+    pub message: Option<(String, Vec<String>)>,
 }
 
 impl App {
@@ -252,6 +256,7 @@ impl App {
             last_click: None,
             marquee: Marquee { key: String::new(), since: Instant::now() },
             force_redraw: false,
+            message: None,
         };
         if !initial.is_empty() {
             app.add_paths(initial);
@@ -455,6 +460,12 @@ impl App {
             Mode::ConfirmDelete => self.key_confirm_delete(k),
             Mode::Rename => self.key_rename(k),
             Mode::MediaInfo => self.key_mediainfo(k),
+            Mode::Message => {
+                if matches!(k.code, KeyCode::Enter | KeyCode::Esc | KeyCode::Char(' ') | KeyCode::F(10)) {
+                    self.message = None;
+                    self.mode = Mode::Normal;
+                }
+            }
             Mode::Finished => {
                 if self.shutdown_at.is_some() {
                     self.shutdown_at = None;
@@ -711,24 +722,36 @@ impl App {
             KeyCode::Char('y' | 'Y' | 't' | 'T') | KeyCode::Enter => {
                 let files = std::mem::take(&mut self.pending_delete);
                 let mut removed: Vec<PathBuf> = vec![];
-                let mut errors: Vec<String> = vec![];
+                let mut errors: Vec<(PathBuf, std::io::Error)> = vec![];
                 for f in &files {
                     match remove_entry(f) {
                         Ok(()) => removed.push(f.clone()),
-                        Err(e) => errors.push(format!(
-                            "{}: {e}",
-                            f.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()
-                        )),
+                        Err(e) => errors.push((f.clone(), e)),
                     }
                 }
                 self.queue.remove_paths(&removed);
                 self.browser.marked.retain(|m| !removed.iter().any(|d| m.starts_with(d)));
                 self.browser.reload(None);
-                self.status_msg = match errors.first() {
-                    None => format!("Usunięto z dysku: {}", removed.len()),
-                    Some(e) => format!("Usunięto: {}, błędy: {} ({e})", removed.len(), errors.len()),
-                };
                 self.mode = Mode::Normal;
+                if errors.is_empty() {
+                    self.status_msg = format!("Usunięto z dysku: {}", removed.len());
+                } else {
+                    self.status_msg = format!("Usunięto: {}, nie udało się: {}", removed.len(), errors.len());
+                    // Okienko z wyjaśnieniem: czego brakuje i jak to naprawić (do 3 pozycji).
+                    let mut lines = vec![];
+                    for (i, (p, e)) in errors.iter().take(3).enumerate() {
+                        if i > 0 {
+                            lines.push(String::new());
+                        }
+                        lines.extend(crate::perm::explain(p, e));
+                    }
+                    if errors.len() > 3 {
+                        lines.push(String::new());
+                        lines.push(format!("… i {} kolejnych błędów.", errors.len() - 3));
+                    }
+                    self.message = Some(("Nie udało się usunąć".into(), lines));
+                    self.mode = Mode::Message;
+                }
             }
             KeyCode::Char('n' | 'N') | KeyCode::Esc => {
                 self.pending_delete.clear();
