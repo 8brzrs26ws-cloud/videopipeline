@@ -1,0 +1,20 @@
+# Konfiguracja terminala dołączonego do VideoPipeline (Alacritty pod nazwą videopipeline-term).
+# Program uruchamia go z --config-file, więc własna konfiguracja Alacritty użytkownika nie ma wpływu.
+
+[env]
+# Program działa już we własnym oknie — nie otwieraj kolejnego (term.rs).
+VIDEOPIPELINE_IN_TERMINAL = "1"
+
+[window]
+title = "VideoPipeline"
+dynamic_title = false
+dimensions = { columns = 160, lines = 45 }
+padding = { x = 4, y = 4 }
+# Linux: klasa X11 / app-id Wayland = videopipeline.desktop → ikona programu na pasku zadań.
+class = { general = "videopipeline", instance = "videopipeline" }
+
+[font]
+size = 11.0
+
+[mouse]
+hide_when_typing = false

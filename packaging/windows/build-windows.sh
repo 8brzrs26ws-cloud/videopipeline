@@ -24,6 +24,8 @@ MKVTOOLNIX_VERSION="${MKVTOOLNIX_VERSION:-latest}"
 MEDIAINFO_VERSION="${MEDIAINFO_VERSION:-latest}"
 # mpv (F3): gotowa kompilacja shinchiro/mpv-winbuild-cmake (tag = data, np. 20261108); "latest" = najnowsza.
 MPV_WIN_TAG="${MPV_WIN_TAG:-latest}"
+# Terminal dołączony do paczki: Alacritty (tag vX.Y.Z) z ikoną VideoPipeline, jako videopipeline-term.exe.
+ALACRITTY_VERSION="${ALACRITTY_VERSION:-latest}"
 NVCODEC_HEADERS_REF="${NVCODEC_HEADERS_REF:-}"
 TARGET_CPU="${TARGET_CPU:-x86-64-v3}"
 JOBS="${JOBS:-$(nproc)}"
@@ -123,7 +125,13 @@ mpv_win_latest() {
     echo "$v"
 }
 resolve MPV_WIN_TAG "github.com/shinchiro/mpv-winbuild-cmake" mpv_win_latest
-echo "Wersje: ffmpeg $FFMPEG_VERSION, dav1d $DAV1D_REF, libvpl $LIBVPL_REF, MKVToolNix $MKVTOOLNIX_VERSION, MediaInfo $MEDIAINFO_VERSION, mpv $MPV_WIN_TAG," \
+alacritty_latest() {
+    local v; v="$(latest_git_tag https://github.com/alacritty/alacritty.git)"
+    [[ -n "$v" ]] || v="$(ls -1d "$CACHE"/alacritty-* 2>/dev/null | sed -E 's|.*/alacritty-([0-9.]+)-.*|\1|' | sort -V | tail -n1)"
+    echo "$v"
+}
+resolve ALACRITTY_VERSION "github.com/alacritty/alacritty" alacritty_latest
+echo "Wersje: ffmpeg $FFMPEG_VERSION, dav1d $DAV1D_REF, libvpl $LIBVPL_REF, MKVToolNix $MKVTOOLNIX_VERSION, MediaInfo $MEDIAINFO_VERSION, mpv $MPV_WIN_TAG, Alacritty $ALACRITTY_VERSION," \
      "dovi_tool $DOVI_TOOL_REF, hdr10plus_tool $HDR10PLUS_TOOL_REF"
 
 export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER="$TRIPLE-gcc"
@@ -299,6 +307,37 @@ if [[ ! -f "$MPVW/mpv.exe" ]]; then
     [[ -f "$MPVW/mpv.exe" ]] || fail "w archiwum mpv brak mpv.exe"
 fi
 
+# Terminal (Alacritty) — okno z TUI z ikoną VideoPipeline na pasku zadań i w ramce okna.
+# build.rs Alacritty dołącza zasoby (ikona, manifest) tylko przy budowaniu na Windows (#[cfg(windows)]
+# w skrypcie budowania), więc przy kroskompilacji robimy to sami: windres + -C link-arg.
+# Gdy budowanie się nie uda, paczka powstaje bez terminala (program użyje konsoli Windows).
+ICON_TAG="$(sha256sum icons/videopipeline.ico | cut -c1-8)"
+TERMW="$CACHE/alacritty-$ALACRITTY_VERSION-$ICON_TAG"
+if [[ "$FORCE" = 1 || ! -f "$TERMW/videopipeline-term.exe" ]]; then
+    log "terminal: Alacritty $ALACRITTY_VERSION jako videopipeline-term.exe (ze źródeł)"
+    build_alacritty_win() {
+        rm -rf "$WORK/alacritty" "$TERMW"
+        git -c advice.detachedHead=false clone --quiet --depth 1 --branch "v$ALACRITTY_VERSION" \
+            https://github.com/alacritty/alacritty.git "$WORK/alacritty" || return 1
+        local res="$WORK/alacritty/alacritty/windows"
+        [[ -f "$res/alacritty.rc" && -f "$res/alacritty.ico" ]] || { echo "brak $res/alacritty.rc/.ico" >&2; return 1; }
+        cp icons/videopipeline.ico "$res/alacritty.ico"
+        (cd "$res" && "$TRIPLE-windres" -O coff -i alacritty.rc -o "$WORK/alacritty-res.o") || return 1
+        (cd "$WORK/alacritty" && CARGO_TARGET_DIR="$WORK/alacritty/target" \
+            RUSTFLAGS="-C target-cpu=$TARGET_CPU -C link-arg=$WORK/alacritty-res.o" \
+            cargo build --release --locked -p alacritty --target "$RTARGET") || return 1
+        mkdir -p "$TERMW"
+        cp "$WORK/alacritty/target/$RTARGET/release/alacritty.exe" "$TERMW/videopipeline-term.exe"
+        cp "$WORK/alacritty/LICENSE-APACHE" "$TERMW/LICENSE-ALACRITTY.txt"
+        "$TRIPLE-strip" "$TERMW/videopipeline-term.exe" || true
+        "$TRIPLE-objdump" -h "$TERMW/videopipeline-term.exe" | grep '\.rsrc' >/dev/null \
+            || { echo "videopipeline-term.exe bez zasobów (ikony)" >&2; rm -rf "$TERMW"; return 1; }
+    }
+    if ! build_alacritty_win; then
+        echo "UWAGA: nie udało się zbudować Alacritty dla Windows — paczka bez videopipeline-term.exe" >&2
+    fi
+fi
+
 # ------------------------------------------------------------------ 6. pakiet .zip
 log "6/6 składanie $PKGNAME.zip"
 rm -rf "$PKG" && mkdir -p "$PKG"
@@ -312,6 +351,11 @@ cp "$MI"/*.exe "$PKG/"
 for d in "$MI"/*.dll "$MI"/*.DLL; do
     if [[ -f "$d" ]]; then cp "$d" "$PKG/"; fi
 done
+# Terminal z ikoną VideoPipeline (jeśli zbudowany) i jego konfiguracja.
+if [[ -f "$TERMW/videopipeline-term.exe" ]]; then
+    cp "$TERMW/videopipeline-term.exe" "$TERMW/LICENSE-ALACRITTY.txt" "$PKG/"
+    cp packaging/videopipeline-term.toml "$PKG/"
+fi
 # mpv.exe (+ ewentualne DLL z paczki); program szuka mpv najpierw obok videopipeline.exe.
 cp "$MPVW/mpv.exe" "$PKG/"
 for d in "$MPVW"/*.dll; do

@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         mkvtoolnix mediainfo libdav1d-dev zlib1g-dev libmagic-mgc \
         libva-dev libdrm-dev libvpl-dev \
         mingw-w64 libz-mingw-w64-dev meson ninja-build cmake 7zip zip libarchive-tools \
-        libshaderc-dev libass-dev libavcodec-dev libavformat-dev libavfilter-dev libavdevice-dev \
+        libshaderc-dev libfreetype-dev libfontconfig-dev libxcb-xfixes0-dev libass-dev libavcodec-dev libavformat-dev libavfilter-dev libavdevice-dev \
         libavutil-dev libswscale-dev libswresample-dev liblua5.2-dev libuchardet-dev liblcms2-dev \
         libjpeg-dev libzimg-dev libx11-dev libxext-dev libxpresent-dev libxrandr-dev libxinerama-dev \
         libxss-dev libxkbcommon-dev libwayland-dev wayland-protocols libegl-dev libgl-dev libgbm-dev \

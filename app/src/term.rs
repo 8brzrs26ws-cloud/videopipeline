@@ -1,15 +1,59 @@
-//! Uruchamianie z menedżera plików (np. dwuklik w Dolphinie/KDE): gdy proces nie ma terminala,
-//! otwieramy własne okno terminala i uruchamiamy w nim ten sam program z tymi samymi argumentami.
-//! Windows: program konsolowy uruchomiony z Eksploratora sam dostaje okno konsoli — nic nie
-//! uruchamiamy ponownie, ale przy błędzie czekamy na Enter, zanim okno zniknie.
+//! Uruchamianie z menu lub menedżera plików (np. dwuklik w Dolphinie/Eksploratorze): gdy proces nie ma
+//! terminala, otwieramy własne okno i uruchamiamy w nim ten sam program z tymi samymi argumentami.
+//! Najpierw terminal dołączony do paczek (Alacritty jako videopipeline-term, z ikoną VideoPipeline
+//! na pasku zadań i w ramce okna), potem terminale z systemu.
+//! Windows: bez dołączonego terminala program zostaje w oknie konsoli, które dał mu system,
+//! a przy błędzie czeka na Enter, zanim okno zniknie.
 use std::{
     env,
+    ffi::OsString,
     io::{self, BufRead, Write},
+    path::{Path, PathBuf},
+    process::Command,
+    time::{Duration, Instant},
 };
 #[cfg(not(windows))]
-use std::{io::IsTerminal, process::Command};
+use std::io::IsTerminal;
 
 const MARK: &str = "VIDEOPIPELINE_IN_TERMINAL";
+
+/// Terminal dołączony do paczek (obok binarki): program i argumenty poprzedzające polecenie.
+fn bundled_terminal() -> Option<(PathBuf, Vec<OsString>)> {
+    let dir = env::current_exe().ok()?.parent()?.to_path_buf();
+    let term = dir.join(format!("videopipeline-term{}", env::consts::EXE_SUFFIX));
+    if !term.is_file() {
+        return None;
+    }
+    let mut pre: Vec<OsString> = vec![];
+    let cfg = dir.join("videopipeline-term.toml");
+    if cfg.is_file() {
+        pre.push("--config-file".into());
+        pre.push(cfg.into_os_string());
+    }
+    for a in ["--class", "videopipeline,videopipeline", "--title", "VideoPipeline", "-e"] {
+        pre.push(a.into());
+    }
+    Some((term, pre))
+}
+
+/// Uruchamia dołączony terminal z programem. `None`, gdy okno nie wystartowało (np. brak OpenGL
+/// w maszynie wirtualnej) — wtedy próbujemy dalej. `wait`: czekaj na zamknięcie okna.
+fn spawn_bundled(term: &Path, pre: &[OsString], exe: &Path, args: &[OsString], wait: bool) -> Option<i32> {
+    let mut child = Command::new(term).args(pre).arg(exe).args(args).env(MARK, "1").spawn().ok()?;
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_millis(1500) {
+        match child.try_wait() {
+            Ok(Some(st)) => return st.success().then_some(0),
+            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+            Err(_) => return None,
+        }
+    }
+    if wait {
+        Some(child.wait().ok()?.code().unwrap_or(0))
+    } else {
+        Some(0)
+    }
+}
 
 #[cfg(not(windows))]
 fn has_tty() -> bool {
@@ -53,11 +97,43 @@ fn own_console_window() -> bool {
     n == 1
 }
 
+/// Windows: konsola widoczna/ukryta (okno conhost; w Windows Terminal bez efektu).
+#[cfg(windows)]
+fn show_console(show: bool) {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetConsoleWindow() -> *mut std::ffi::c_void;
+    }
+    #[link(name = "user32")]
+    extern "system" {
+        fn ShowWindow(hwnd: *mut std::ffi::c_void, cmd: i32) -> i32;
+    }
+    // SAFETY: uchwyt okna konsoli sprawdzony przed użyciem.
+    unsafe {
+        let h = GetConsoleWindow();
+        if !h.is_null() {
+            ShowWindow(h, if show { 5 } else { 0 }); // SW_SHOW / SW_HIDE
+        }
+    }
+}
+
 #[cfg(windows)]
 pub fn relaunch_in_terminal() -> Option<i32> {
-    if own_console_window() {
-        env::set_var(MARK, "1"); // okno zniknie razem z programem — przy błędzie poczekaj na Enter
+    // Już w naszym oknie albo uruchomiony z istniejącej konsoli (cmd, PowerShell) — zostajemy.
+    if env::var_os(MARK).is_some() || !own_console_window() {
+        return None;
     }
+    if let Some((term, pre)) = bundled_terminal() {
+        let exe = env::current_exe().ok()?;
+        let args: Vec<OsString> = env::args_os().skip(1).collect();
+        show_console(false);
+        // Nie czekamy na zamknięcie okna: konsola, którą dał system, ma zniknąć od razu.
+        if let Some(code) = spawn_bundled(&term, &pre, &exe, &args, false) {
+            return Some(code);
+        }
+        show_console(true);
+    }
+    env::set_var(MARK, "1"); // okno zniknie razem z programem — przy błędzie poczekaj na Enter
     None
 }
 
@@ -71,39 +147,48 @@ pub fn relaunch_in_terminal() -> Option<i32> {
     // W AppImage current_exe() to ścieżka w tymczasowym montowaniu; ponowne uruchomienie
     // w terminalu ma użyć samego pliku AppImage ($APPIMAGE).
     let exe = match env::var_os("APPIMAGE") {
-        Some(p) if !p.is_empty() => std::path::PathBuf::from(p),
+        Some(p) if !p.is_empty() => PathBuf::from(p),
         _ => env::current_exe().ok()?,
     };
-    let args: Vec<String> = env::args().skip(1).collect();
+    let args: Vec<OsString> = env::args_os().skip(1).collect();
 
     // Własne wskazanie terminala ma pierwszeństwo: VIDEOPIPELINE_TERMINAL="foot" itp.
-    let mut candidates: Vec<(String, Vec<String>)> = vec![];
-    if let Ok(t) = env::var("VIDEOPIPELINE_TERMINAL") {
+    let custom = env::var("VIDEOPIPELINE_TERMINAL").ok().and_then(|t| {
         let mut it = t.split_whitespace().map(String::from);
-        if let Some(prog) = it.next() {
-            let mut pre: Vec<String> = it.collect();
-            // Sama nazwa znanego terminala: jego argumenty (tytuł, klasa okna) z listy poniżej.
-            if pre.is_empty() {
-                if let Some((_, p)) = TERMINALS.iter().find(|(n, _)| *n == prog) {
-                    pre = p.iter().map(|s| s.to_string()).collect();
-                }
+        let prog = it.next()?;
+        let mut pre: Vec<String> = it.collect();
+        // Sama nazwa znanego terminala: jego argumenty (tytuł, klasa okna) z listy poniżej.
+        if pre.is_empty() {
+            if let Some((_, p)) = TERMINALS.iter().find(|(n, _)| *n == prog) {
+                pre = p.iter().map(|s| s.to_string()).collect();
             }
-            candidates.push((prog, pre));
+        }
+        Some((prog, pre))
+    });
+    let run = |prog: &str, pre: &[String]| -> Option<i32> {
+        if !in_path(prog) {
+            return None;
+        }
+        // gnome-terminal i część innych zwraca od razu po otwarciu okna — to nie błąd.
+        let st = Command::new(prog).args(pre).arg(&exe).args(&args).env(MARK, "1").status().ok()?;
+        Some(st.code().unwrap_or(0))
+    };
+
+    if let Some((prog, pre)) = &custom {
+        if let Some(code) = run(prog, pre) {
+            return Some(code);
+        }
+    }
+    // Terminal z paczki (AppImage, deb, Arch) — ikona VideoPipeline na pasku zadań.
+    if let Some((term, pre)) = bundled_terminal() {
+        if let Some(code) = spawn_bundled(&term, &pre, &exe, &args, true) {
+            return Some(code);
         }
     }
     for (prog, pre) in TERMINALS {
-        candidates.push((prog.to_string(), pre.iter().map(|s| s.to_string()).collect()));
-    }
-
-    for (prog, pre) in candidates {
-        if !in_path(&prog) {
-            continue;
-        }
-        let status = Command::new(&prog).args(&pre).arg(&exe).args(&args).env(MARK, "1").status();
-        match status {
-            // gnome-terminal i część innych zwraca od razu po otwarciu okna — to nie błąd.
-            Ok(s) => return Some(s.code().unwrap_or(0)),
-            Err(_) => continue,
+        let pre: Vec<String> = pre.iter().map(|s| s.to_string()).collect();
+        if let Some(code) = run(prog, &pre) {
+            return Some(code);
         }
     }
     None

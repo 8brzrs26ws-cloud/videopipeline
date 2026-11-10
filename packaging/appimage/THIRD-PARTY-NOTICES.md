@@ -12,6 +12,7 @@
 | MediaInfo (CLI; Linux: z bibliotekami z dystrybucji Debian, Windows: oficjalne CLI MediaArea) | BSD-2-Clause | https://mediaarea.net/MediaInfo |
 | mpv (odtwarzacz pod F3) — Linux: budowany ze źródeł z bibliotekami z dystrybucji Debian (FFmpeg/libav*, libass, shaderc, Lua…); Windows: gotowa kompilacja shinchiro/mpv-winbuild-cmake | GPL-2.0+ | https://github.com/mpv-player/mpv, https://github.com/shinchiro/mpv-winbuild-cmake |
 | libplacebo (Linux: statycznie w mpv, budowana ze źródeł) | LGPL-2.1+ | https://code.videolan.org/videolan/libplacebo |
+| Alacritty (terminal `videopipeline-term`, budowany ze źródeł z podmienioną ikoną) | Apache-2.0 (LICENSE-ALACRITTY) | https://github.com/alacritty/alacritty |
 | dovi_tool | MIT | https://github.com/quietvoid/dovi_tool |
 | hdr10plus_tool | MIT | https://github.com/quietvoid/hdr10plus_tool |
 | Biblioteka standardowa Rusta (libstd / std-*.dll) | MIT / Apache-2.0 | https://github.com/rust-lang/rust |

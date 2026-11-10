@@ -56,20 +56,22 @@ Do kodowania na Intelu doinstaluj `intel-media-driver` i `vpl-gpu-rt`; na NVIDII
 konsoli; najlepiej wygląda w Windows Terminal). Wszystkie pliki muszą zostać w jednym folderze. Pliki nie są podpisane
 cyfrowo, więc SmartScreen może poprosić o potwierdzenie. Pliki przeciągnięte na `videopipeline.exe` są od razu kodowane
 (tryb skryptowy). W lewym panelu, w katalogu głównym dysku, widać pozostałe dyski.
-`utworz-skrot.cmd` z paczki tworzy skrót „VideoPipeline” na pulpicie i w menu Start (zob. niżej: ikona na pasku zadań).
+`utworz-skrot.cmd` z paczki tworzy skrót „VideoPipeline” na pulpicie i w menu Start (zob. niżej: okno programu).
 
 Sumy kontrolne leżą obok plików (`.sha256`).
 
-### Ikona na pasku zadań
+### Okno programu i ikona na pasku zadań
 
-TUI działa w oknie terminala, więc pasek zadań pokazuje zwykle ikonę terminala. VideoPipeline ustawia tytuł okna
-„VideoPipeline” (przywracany przy wyjściu), a dodatkowo:
+Uruchomiony z menu aplikacji, dwuklikiem albo ze skrótu VideoPipeline otwiera się we własnym oknie: paczki
+(AppImage, deb, Arch, Windows) zawierają terminal `videopipeline-term` — [Alacritty](https://github.com/alacritty/alacritty)
+zbudowany ze źródeł z ikoną VideoPipeline i własną konfiguracją (`videopipeline-term.toml` obok programu).
+Pasek zadań i ramka okna pokazują wtedy ikonę VideoPipeline — w KDE, GNOME, na X11 i Wayland oraz w Windows.
 
-- **kitty, foot, alacritty, wezterm, xterm** — okno otwierane z menu dostaje klasę / app-id `videopipeline`,
-  więc pasek zadań pokazuje ikonę programu. Konsole (KDE) nie pozwala zmienić app-id okna, więc tam zostaje
-  ikona Konsole; wybór terminala: zmienna `VIDEOPIPELINE_TERMINAL` (np. `kitty`).
-- **Windows** — `videopipeline.exe` ma wbudowaną ikonę. W klasycznej konsoli (conhost) program ustawia ją na oknie;
-  Windows Terminal zawsze pokazuje własną ikonę. Skrót z `utworz-skrot.cmd` uruchamia program w conhost.
+- Wpisane w otwartym terminalu `videopipeline` działa w tym terminalu (i z jego ikoną).
+- Terminal wymaga OpenGL; gdy nie wystartuje (np. maszyna wirtualna, Pulpit zdalny), program użyje terminala
+  z systemu (Konsole, GNOME Terminal, kitty… — Windows: konsola systemowa).
+- Własny terminal zamiast dołączonego: `VIDEOPIPELINE_TERMINAL=kitty` (albo pełne polecenie, np. `"foot -e"`).
+- Windows: `utworz-skrot.cmd` tworzy skrót na pulpicie i w menu Start (można go przypiąć do paska zadań).
 
 ## Użycie
 
@@ -214,6 +216,7 @@ Zmienne dla `build-local.sh`:
 | `DAV1D_REF`, `LIBVPL_REF`, `MKVTOOLNIX_VERSION`, `MEDIAINFO_VERSION` | Windows: wersje bibliotek, MKVToolNix i MediaInfo, domyślnie `latest` |
 | `MPV_VERSION` | Linux: wersja mpv budowanego ze źródeł (np. `0.41.0`), domyślnie `latest` |
 | `LIBPLACEBO_REF` | Linux: wersja libplacebo budowanej razem z mpv, domyślnie `latest` (najnowsza zgodna z wymaganiem mpv) |
+| `ALACRITTY_VERSION` | wersja Alacritty (terminal `videopipeline-term`), domyślnie `latest` |
 | `MPV_WIN_TAG` | Windows: tag wydania shinchiro (data, np. `20261108`), domyślnie `latest` |
 | `TARGET_CPU` | domyślnie `x86-64-v3` |
 | `FORCE=1` | przebuduj ffmpeg i narzędzia mimo cache |

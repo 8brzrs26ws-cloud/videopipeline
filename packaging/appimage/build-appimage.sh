@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Buduje dist/VideoPipeline-<wersja>-x86_64_v3.AppImage z dołączonymi narzędziami:
 #   ffmpeg + ffprobe (NVENC/NVDEC/CUDA-LLVM statycznie; Intel QSV/VAAPI z libva/libvpl linkowanymi dynamicznie),
-#   mkvmerge, mediainfo, dovi_tool, hdr10plus_tool oraz odtwarzacz mpv (F3, budowany ze źródeł; MPV_VERSION).
+#   mkvmerge, mediainfo, dovi_tool, hdr10plus_tool oraz odtwarzacz mpv (F3, budowany ze źródeł; MPV_VERSION)
+#   i terminal videopipeline-term (Alacritty ze źródeł z ikoną VideoPipeline; ALACRITTY_VERSION).
 # Kod własny (videopipeline, biblioteka core, dovi_tool, hdr10plus_tool, ffmpeg) jest kompilowany
 # z -march/-C target-cpu=x86-64-v3. Sterowniki NVIDIA pochodzą z hosta i NIE są dołączane.
 #
@@ -25,6 +26,8 @@ DOVI_TOOL_REF="${DOVI_TOOL_REF:-2.3.4}"
 HDR10PLUS_TOOL_REF="${HDR10PLUS_TOOL_REF:-1.7.2}"
 # Odtwarzacz mpv (F3) — budowany ze źródeł (tag vX.Y.Z z github.com/mpv-player/mpv); "latest" = najnowsze wydanie.
 MPV_VERSION="${MPV_VERSION:-latest}"
+# Terminal dołączony do paczek: Alacritty (tag vX.Y.Z) z ikoną VideoPipeline, jako videopipeline-term.
+ALACRITTY_VERSION="${ALACRITTY_VERSION:-latest}"
 TARGET_CPU="${TARGET_CPU:-x86-64-v3}"
 INTEL="${INTEL:-auto}"
 JOBS="${JOBS:-$(nproc)}"
@@ -217,6 +220,39 @@ fi
 [[ -x "$MPVPREFIX/bin/mpv" ]] || fail "brak $MPVPREFIX/bin/mpv"
 "$MPVPREFIX/bin/mpv" --no-config --version | sed -n 1p
 
+# --------------------------------------------------------------- 3c. terminal (Alacritty)
+# Okno z TUI otwierane z menu ma własną ikonę na pasku zadań i w ramce: Alacritty z podmienioną
+# ikoną (X11) i klasą/app-id „videopipeline” (Wayland → videopipeline.desktop), pod inną nazwą pliku,
+# żeby Plasma nie dopasowała procesu do alacritty.desktop.
+if [[ "$ALACRITTY_VERSION" = latest ]]; then
+    ALACRITTY_VERSION="$({ GIT_TERMINAL_PROMPT=0 timeout 60 git ls-remote --tags --refs https://github.com/alacritty/alacritty.git 2>/dev/null || true; } \
+        | sed 's|.*refs/tags/||' | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } | sed 's/^v//' | sort -V | tail -n1)"
+    if [[ -z "$ALACRITTY_VERSION" ]]; then
+        ALACRITTY_VERSION="$(ls -1d "$CACHE"/alacritty-* 2>/dev/null | sed -E 's|.*/alacritty-([0-9.]+)-.*|\1|' | sort -V | tail -n1)"
+    fi
+    [[ -n "$ALACRITTY_VERSION" ]] || fail "nie udało się ustalić wersji Alacritty — podaj ALACRITTY_VERSION=..."
+fi
+log "3c/5 terminal: Alacritty $ALACRITTY_VERSION jako videopipeline-term (ze źródeł)"
+ICON_TAG="$(sha256sum "$ROOT/icons/videopipeline-64.png" | cut -c1-8)"
+TERMDIR="$CACHE/alacritty-$ALACRITTY_VERSION-$ICON_TAG"
+if [[ "$FORCE" = 1 || ! -x "$TERMDIR/videopipeline-term" ]]; then
+    rm -rf "$WORK/alacritty" "$TERMDIR"
+    git -c advice.detachedHead=false clone --quiet --depth 1 --branch "v$ALACRITTY_VERSION" \
+        https://github.com/alacritty/alacritty.git "$WORK/alacritty"
+    # Ikona okna X11 jest wkompilowana (include_bytes!) — podmieniamy ją przed budowaniem.
+    ICON_PNG="$WORK/alacritty/extra/logo/compat/alacritty-term.png"
+    [[ -f "$ICON_PNG" ]] || fail "Alacritty $ALACRITTY_VERSION: brak $ICON_PNG (zmieniła się struktura źródeł)"
+    cp "$ROOT/icons/videopipeline-64.png" "$ICON_PNG"
+    # Własny katalog target i RUSTFLAGS: bez prefer-dynamic z .cargo/config.toml VideoPipeline.
+    (cd "$WORK/alacritty" && CARGO_TARGET_DIR="$WORK/alacritty/target" RUSTFLAGS="-C target-cpu=$TARGET_CPU" \
+        cargo build --release --locked -p alacritty)
+    mkdir -p "$TERMDIR"
+    install -m755 "$WORK/alacritty/target/release/alacritty" "$TERMDIR/videopipeline-term"
+    strip "$TERMDIR/videopipeline-term"
+    cp "$WORK/alacritty/LICENSE-APACHE" "$TERMDIR/LICENSE-ALACRITTY"
+fi
+"$TERMDIR/videopipeline-term" --version
+
 # --------------------------------------------------------------------------- 4. AppDir
 log "4/5 składanie AppDir"
 rm -rf "$APPDIR"
@@ -237,6 +273,8 @@ install -m755 "$TOOLS/bin/dovi_tool" "$TOOLS/bin/hdr10plus_tool" "$APPDIR/usr/bi
 install -m755 "$(command -v mkvmerge)" "$APPDIR/usr/bin/"
 install -m755 "$(command -v mediainfo)" "$APPDIR/usr/bin/"
 install -m755 "$MPVPREFIX/bin/mpv" "$APPDIR/usr/bin/"
+install -m755 "$TERMDIR/videopipeline-term" "$APPDIR/usr/bin/"
+install -m644 packaging/videopipeline-term.toml "$APPDIR/usr/bin/"
 for m in /usr/lib/file/magic.mgc /usr/share/misc/magic.mgc; do
     if [[ -f "$m" ]]; then cp -L "$m" "$APPDIR/usr/share/misc/magic.mgc"; break; fi
 done
@@ -244,6 +282,7 @@ done
 install -m644 packaging/appimage/videopipeline.desktop "$APPDIR/usr/share/applications/"
 install -m644 LICENSE "$APPDIR/usr/share/licenses/videopipeline/LICENSE"
 install -m644 packaging/appimage/THIRD-PARTY-NOTICES.md "$APPDIR/usr/share/licenses/videopipeline/"
+install -m644 "$TERMDIR/LICENSE-ALACRITTY" "$APPDIR/usr/share/licenses/videopipeline/"
 
 # Kontrola: aplikacja ma znaleźć libstd i bibliotekę core w AppDir (rpath $ORIGIN/../lib).
 ldd "$APPDIR/usr/bin/videopipeline" > "$WORK/ldd.txt" || true
@@ -285,6 +324,7 @@ export LINUXDEPLOY_OUTPUT_VERSION="$VERSION"
         --executable "$APPDIR/usr/bin/mkvmerge" \
         --executable "$APPDIR/usr/bin/mediainfo" \
         --executable "$APPDIR/usr/bin/mpv" \
+        --executable "$APPDIR/usr/bin/videopipeline-term" \
         --executable "$APPDIR/usr/bin/ffmpeg" \
         --executable "$APPDIR/usr/bin/ffprobe" \
         --executable "$APPDIR/usr/bin/dovi_tool" \
