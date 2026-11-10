@@ -1,10 +1,16 @@
-# VideoPipeline
+<p align="center">
+  <img src="icons/videopipeline-128.png" width="128" height="128" alt="Ikona VideoPipeline">
+</p>
+
+<h1 align="center">VIDEOPIPELINE</h1>
 
 VideoPipeline kompresuje filmy do HEVC albo AV1 na karcie graficznej: NVIDIA (NVENC) albo Intel (QSV, na Linuksie
 zapasowo VAAPI). Działa na Linuksie i Windows. Ma interfejs terminalowy w stylu Midnight Commandera, a podany z plikami
 działa jako zwykłe polecenie do skryptów.
 
-![Panele: pliki i kolejka kodowania](docs/screenshots/panele.png)
+![Kodowanie dwóch plików naraz na RTX 5070 Ti (DUAL NVENC)](docs/screenshots/kodowanie.png)
+
+Więcej zrzutów: [galeria](#galeria).
 
 ## Do czego służy
 
@@ -105,8 +111,6 @@ przy każdym rozmiarze okna.
 **F7 — opcje.** Wiersz „Kodek wideo” przełącza między działającymi w systemie kombinacjami kodeka i karty,
 np. `HEVC NVENC → AV1 NVENC → HEVC QSV`; pod listą widać, co wykryto. Pozostałe wiersze odpowiadają flagom z tabeli niżej.
 
-![Okno opcji F7](docs/screenshots/opcje-f7.png)
-
 **F9 — kodowanie.** Okno pokazuje postęp każdego pliku, prędkość, ETA, log i obciążenie sprzętu:
 
 - NVIDIA: GPU, NVENC (koder), NVDEC (dekoder), VRAM — z `nvidia-smi`;
@@ -116,16 +120,7 @@ np. `HEVC NVENC → AV1 NVENC → HEVC QSV`; pod listą widać, co wykryto. Pozo
   taktowanie karty), Windows: liczniki wydajności „GPU Engine”, te same co w Menedżerze zadań;
 - zawsze CPU i RAM.
 
-![Okno kodowania — NVIDIA NVENC](docs/screenshots/kodowanie.png)
-
-Linux, kodowanie na karcie Intel (HEVC QSV, Iris Xe w Core i5-1235U, dekodowanie `h264_qsv`):
-
-![Okno kodowania — Intel QSV](docs/screenshots/kodowanie-intel.png)
-
-Windows 11, Core Ultra 5 225H (Intel Arc): HEVC QSV z dekodowaniem `h264_qsv`, ok. 90 fps, monitor z liczników
-„GPU Engine”:
-
-![Okno kodowania — Windows, Intel QSV](docs/screenshots/kodowanie-windows-intel.jpg)
+Zrzut na początku strony pokazuje kodowanie dwóch plików naraz (DUAL NVENC); Windows z Intel QSV — w [galerii](#galeria).
 
 ### Tryb skryptowy
 
@@ -176,6 +171,44 @@ podobną, ale nie taką samą jakość i rozmiar.
 Nazwa zawiera kodek i opcje, np. `film_hevc.mkv`, `film_hevc_qsv_cq22.mkv`, `film_av1_10bit_cq23_da.mkv`, więc wyniki
 z różnymi ustawieniami się nie nadpisują. Przerwane kodowanie wznawia się od ostatniego ukończonego etapu.
 W MP4 Dolby Vision zostaje w strumieniu, ale bez rekordu konfiguracji — część odtwarzaczy pokaże wtedy zwykły HDR10.
+
+## Galeria
+
+Wszystkie zrzuty pochodzą z wersji 0.16.0 (Linux, KDE Plasma, okno `videopipeline-term`), poza zdjęciem z Windows.
+Kliknij miniaturę, żeby zobaczyć pełny rozmiar.
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <a href="docs/screenshots/panele.png"><img src="docs/screenshots/panele.png" alt="Panele: pliki i kolejka"></a><br>
+      Panele: pliki (lewy) i kolejka kodowania (prawy)
+    </td>
+    <td align="center" width="50%">
+      <a href="docs/screenshots/kodowanie.png"><img src="docs/screenshots/kodowanie.png" alt="Kodowanie (F9)"></a><br>
+      F9 — kodowanie: postęp, fps, ETA, obciążenie GPU/NVENC/NVDEC, log
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="docs/screenshots/mediainfo-f2.png"><img src="docs/screenshots/mediainfo-f2.png" alt="MediaInfo (F2)"></a><br>
+      F2 — informacje o pliku (MediaInfo)
+    </td>
+    <td align="center">
+      <a href="docs/screenshots/opcje-f7.png"><img src="docs/screenshots/opcje-f7.png" alt="Opcje (F7)"></a><br>
+      F7 — opcje: kodek i karta, jakość, audio, katalog wyjściowy
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="docs/screenshots/kasowanie-f6.png"><img src="docs/screenshots/kasowanie-f6.png" alt="Usuwanie (F6)"></a><br>
+      F6 — usuwanie z ostrzeżeniem o zawartości katalogu
+    </td>
+    <td align="center">
+      <a href="docs/screenshots/kodowanie-windows-intel.jpg"><img src="docs/screenshots/kodowanie-windows-intel.jpg" alt="Windows 11, Intel QSV"></a><br>
+      Windows 11, Core Ultra 5 225H (Intel Arc): HEVC QSV, ok. 90 fps
+    </td>
+  </tr>
+</table>
 
 ## Budowanie ze źródeł
 
