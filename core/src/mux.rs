@@ -290,10 +290,16 @@ pub fn run(opts: &Opts, a: &Analysis, analysis_file: &Path, panel: &mut Panel) -
 
     if p.output.exists() {
         // Plik gotowy: zakodowany od razu do kontenera w etapie 2 albo z wcześniejszego uruchomienia.
-        let direct = opts.direct_encode(a.has_dovi, a.has_hdr10plus);
+        let direct = opts.no_temp_video(a.has_dovi, a.has_hdr10plus);
         remove_temps(&p, analysis_file);
         finish_copy(opts, a, &p.output, !direct, panel);
         return Ok(());
+    }
+    if opts.no_temp_video(a.has_dovi, a.has_hdr10plus)
+        && ![&p.temp_video, &p.step1, &p.step2].iter().any(|f| f.exists())
+    {
+        // Kodowanie wprost do pliku wynikowego nie powiodło się (szczegóły w logu etapu 2).
+        bail!("kodowanie nie utworzyło pliku wynikowego — szczegóły w logu");
     }
     plog!(" -> [{name}] Składanie pliku wynikowego ({})...", opts.codec.name());
 

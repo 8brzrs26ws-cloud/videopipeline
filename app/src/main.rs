@@ -93,6 +93,9 @@ struct Cli {
     /// Pomiń analizę HDR10+ (-ph)
     #[arg(long = "no-hdr10plus")]
     no_hdr10plus: bool,
+    /// DV/HDR10+ starą ścieżką: plik tymczasowy + dovi_tool / hdr10plus_tool + mkvmerge
+    #[arg(long = "legacy-inject")]
+    legacy_inject: bool,
     /// Tryb skryptowy także bez ścieżek (wtedy katalog bieżący, jak w V9)
     #[arg(short = 'b', long)]
     batch: bool,
@@ -302,6 +305,7 @@ fn real_main() -> Result<i32> {
         no_crop: cli.no_crop,
         no_dv: cli.no_dv,
         no_hdr10plus: cli.no_hdr10plus,
+        legacy_inject: cli.legacy_inject,
         shutdown: cli.shutdown,
         output_dir: platform::default_output_dir(),
         container: cli.container.as_deref().and_then(ContainerChoice::from_name).unwrap_or(ContainerChoice::Auto),

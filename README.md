@@ -32,7 +32,7 @@ Więcej zrzutów: [galeria](#galeria).
 | Karta NVIDIA | AVC i HEVC: GeForce GTX 10xx (Pascal) lub nowsza; AV1: RTX 40xx / 50xx. Sterownik 570 lub nowszy (`nvidia-smi` do monitora obciążenia) |
 | Karta Intel | AVC i HEVC: Core 7. gen. (Kaby Lake) lub nowszy; AV1: Arc (A/B), Core Ultra (Meteor Lake) lub nowszy |
 | Sterowniki Intel | Linux: `intel-media-driver` (iHD, VA-API) i runtime oneVPL: `vpl-gpu-rt` (Tiger Lake i nowsze) albo `intel-media-sdk` (starsze); na Debianie `intel-media-va-driver-non-free` i `libmfx-gen1.2`; użytkownik w grupie `render`. Windows: aktualny sterownik grafiki Intel (zawiera runtime oneVPL) |
-| Miejsce na dysku | na wynik; przy Dolby Vision / HDR10+ także na pliki tymczasowe (rzędu rozmiaru wyniku) |
+| Miejsce na dysku | na wynik (pliki tymczasowe wideo tylko przy `--legacy-inject`) |
 
 Wystarczy jedna karta. Gdy w komputerze są obie, domyślnie koduje NVIDIA, a Intela wybiera się jawnie (niżej).
 
@@ -179,11 +179,12 @@ Przy starcie program wykrywa enkodery krótkim kodowaniem testowym (sama obecno�
 | `--intel`, `--engine nvenc\|qsv\|vaapi` | wybór karty (wyżej) |
 | `-q N`, `--hevc-cq N`, `--av1-cq N`, `--avc-cq N` | jakość, 1–51, mniej = lepiej (domyślnie HEVC 19, AV1 25, AVC 18 — AVC potrzebuje niższego CQ do podobnej jakości) |
 | `--qsv-preset P` | preset Intel QSV: `veryfast` … `veryslow` (domyślnie `slow`); `veryslow` na zintegrowanej grafice bywa kilka razy wolniejszy przy niewielkim zysku jakości |
-| `--container auto\|mkv\|mp4` | kontener wyniku (domyślnie jak źródło); w MP4 Dolby Vision i HDR10+ nie są pełne — do nich MKV |
+| `--container auto\|mkv\|mp4` | kontener wyniku (domyślnie jak źródło); Dolby Vision i HDR10+ w obu |
 | `-pleac3` | polska ścieżka → E-AC-3 stereo 192 kb/s |
 | `-da` | dodatkowo angielskie audio (E-AC-3 5.1) oraz napisy EN i PL |
 | `-d` | łagodne odszumianie (tylko źródła SDR 8-bit; CUDA, vpp_qsv / denoise_vaapi albo CPU) |
 | `-pc` | bez wykrywania czarnych pasów (najdłuższy etap analizy) |
+| `--legacy-inject` | Dolby Vision / HDR10+ starą ścieżką: plik tymczasowy `.hevc`, dovi_tool / hdr10plus_tool i mkvmerge (domyślnie w locie, bez plików pośrednich) |
 | `-pdv`, `-ph` | bez Dolby Vision / bez HDR10+ |
 | `-c` | kopia wyniku do `<katalog źródła>/encoded` z weryfikacją SHA-512 |
 | `-s` | wyłącz komputer po zakończeniu |
@@ -210,14 +211,18 @@ z różnymi ustawieniami się nie nadpisują.
 **Analiza Dolby Vision i HDR10+** czyta strumień wideo raz dla obu narzędzi (dovi_tool i hdr10plus_tool dostają
 te same dane), a okno analizy pokazuje postęp odczytu: procent, pozycję w filmie, prędkość i szacowany czas do końca.
 
-**Bez plików tymczasowych.** Gdy w źródle nie ma Dolby Vision ani HDR10+ (albo ich analiza jest wyłączona: `-pdv`, `-ph`),
-a także zawsze dla AV1 i AVC, ffmpeg koduje wideo i od razu zapisuje plik wynikowy razem z audio (kopia, a E-AC-3 z `-pleac3`
-/ `-da` w locie) i napisami — bez pośrednich plików `.hevc`/`.eac3` i bez osobnego muksowania, więc dysk dostaje
-o połowę mniej zapisów. Do czasu ukończenia plik ma końcówkę `.part`. Z Dolby Vision / HDR10+ wideo przechodzi przez
-plik tymczasowy, bo metadane trzeba wstrzyknąć (dovi_tool, hdr10plus_tool) przed muksowaniem. Każdy plik pośredni
-jest usuwany zaraz po udanym kolejnym kroku, więc na dysku leżą naraz najwyżej dwie kopie wideo; przerwane kodowanie
+**Bez plików tymczasowych.** ffmpeg koduje wideo i od razu zapisuje plik wynikowy razem z audio (kopia, a E-AC-3
+z `-pleac3` / `-da` w locie) i napisami — bez pośrednich plików `.hevc`/`.eac3` i bez osobnego muksowania. Do czasu
+ukończenia plik ma końcówkę `.part`.
+
+**Dolby Vision i HDR10+ w locie.** Przy źródłach z DV / HDR10+ (HEVC) koder wysyła surowy strumień HEVC do programu,
+który dokleja do każdej klatki jej RPU Dolby Vision i SEI HDR10+ (biblioteki z dovi_tool i hdr10plus_tool), a drugi
+ffmpeg od razu składa z tego plik wynikowy z audio i napisami. Metadane trafiają do klatek według kolejności wyświetlania,
+tak samo jak w `dovi_tool inject-rpu` / `hdr10plus_tool inject` — wynik jest identyczny jak przy starej ścieżce, a plik
+ma rekord konfiguracji DV (dvcC/dvvC) w MKV i w MP4. RPU profilu 7 (dwie warstwy) są przerabiane na 8.1, bo kodowana
+jest tylko warstwa bazowa. Stara ścieżka (plik tymczasowy `.hevc` → hdr10plus_tool → dovi_tool → mkvmerge) jest dostępna
+w F7 albo przez `--legacy-inject`; jej pliki pośrednie są usuwane zaraz po udanym kolejnym kroku, a przerwane kodowanie
 wznawia się od ostatniego ukończonego etapu.
-W MP4 Dolby Vision zostaje w strumieniu, ale bez rekordu konfiguracji — część odtwarzaczy pokaże wtedy zwykły HDR10.
 
 ## Galeria
 

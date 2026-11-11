@@ -34,6 +34,7 @@ const OPTION_HELP: [&str; OPTION_COUNT] = [
     "Bez cropdetect: pełny kadr, najdłuższy etap analizy jest pomijany.",
     "Bez ekstrakcji i wstrzykiwania Dolby Vision — wynik zostaje zwykłym HDR10.",
     "Bez ekstrakcji i wstrzykiwania HDR10+ — zostaje statyczny HDR10.",
+    "Domyślnie w locie. Zaznaczone: stara ścieżka (pliki .hevc + mkvmerge).",
     "Kopia do <źródło>/encoded, do 3 prób z weryfikacją SHA-512.",
     "Wyłącza komputer 10 s po zakończeniu (dowolny klawisz anuluje).",
     "Enter — edytuj, Enter — zatwierdź, Esc — anuluj.",
@@ -517,6 +518,9 @@ fn summary(o: &Opts) -> String {
     if o.no_hdr10plus {
         parts.push("bez HDR10+".into());
     }
+    if o.legacy_inject {
+        parts.push("DV/HDR10+ przez pliki tymczasowe".into());
+    }
     if o.copy {
         parts.push("kopia → encoded".into());
     }
@@ -776,6 +780,7 @@ fn render_options(f: &mut Frame, area: Rect, app: &App) {
         (format!("{} Pomiń crop — bez cropdetect   (-pc)", chk(o.no_crop)), String::new()),
         (format!("{} Pomiń analizę Dolby Vision   (-pdv)", chk(o.no_dv)), String::new()),
         (format!("{} Pomiń analizę HDR10+   (-ph)", chk(o.no_hdr10plus)), String::new()),
+        (format!("{} DV/HDR10+ przez pliki tymczasowe   (--legacy-inject)", chk(o.legacy_inject)), String::new()),
         (format!("{} Kopiuj do source/encoded + SHA-512   (-c)", chk(o.copy)), String::new()),
         (format!("{} Wyłącz komputer po zakończeniu   (-s)", chk(o.shutdown)), String::new()),
         ("Katalog wyjściowy".into(), tail(&out_val, w.saturating_sub(24))),
@@ -793,11 +798,12 @@ fn render_options(f: &mut Frame, area: Rect, app: &App) {
         format!("Wykryte: {}. HEVC: DV/HDR10+; AV1: 10-bit; AVC: 8-bit, tylko SDR.", app.hw.summary())
     } else if app.opt_cursor == crate::app::OPT_CONTAINER {
         match o.container {
-            ContainerChoice::Auto => "Jak źródło: .mp4 → MP4, reszta → MKV. Pełne DV i HDR10+ tylko w MKV.".into(),
+            ContainerChoice::Auto => "Jak źródło: .mp4 → MP4, reszta → MKV.".into(),
             ContainerChoice::Mkv => "MKV: pełne Dolby Vision i HDR10+, wszystkie ścieżki audio i napisy.".into(),
-            ContainerChoice::Mp4 => {
-                "UWAGA: w MP4 Dolby Vision/HDR10+ nie będą pełne — do nich wybierz MKV.".into()
+            ContainerChoice::Mp4 if o.legacy_inject => {
+                "UWAGA: przy starej ścieżce DV/HDR10+ w MP4 nie są pełne — wybierz MKV.".into()
             }
+            ContainerChoice::Mp4 => "MP4: DV i HDR10+ w locie (dvvC); bez napisów obrazkowych (PGS).".into(),
         }
     } else {
         OPTION_HELP[app.opt_cursor.min(OPTION_COUNT - 1)].to_string()

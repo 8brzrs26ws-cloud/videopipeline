@@ -17,6 +17,7 @@
 | Alacritty (terminal `videopipeline-term`, budowany ze źródeł z podmienioną ikoną) | Apache-2.0 (LICENSE-ALACRITTY) | https://github.com/alacritty/alacritty |
 | dovi_tool | MIT | https://github.com/quietvoid/dovi_tool |
 | hdr10plus_tool | MIT | https://github.com/quietvoid/hdr10plus_tool |
+| dolby_vision, hdr10plus (biblioteki Rust w programie — wstrzykiwanie DV/HDR10+ w locie) | MIT | https://github.com/quietvoid/dovi_tool, https://github.com/quietvoid/hdr10plus_tool |
 | Biblioteka standardowa Rusta (libstd / std-*.dll) | MIT / Apache-2.0 | https://github.com/rust-lang/rust |
 | Windows: środowisko uruchomieniowe MinGW-w64 (libgcc, libstdc++, winpthreads — statycznie lub jako DLL) | GPL-3.0 z wyjątkiem GCC Runtime Library / MIT / ZPL | https://www.mingw-w64.org |
 

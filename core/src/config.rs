@@ -204,6 +204,9 @@ pub struct Opts {
     pub no_dv: bool,
     /// pomiń ekstrakcję HDR10+ (i jego wstrzykiwanie)
     pub no_hdr10plus: bool,
+    /// Stara ścieżka DV/HDR10+: plik tymczasowy wideo, dovi_tool / hdr10plus_tool, mkvmerge.
+    /// Domyślnie metadane są wstrzykiwane w locie (bez plików pośrednich).
+    pub legacy_inject: bool,
     pub shutdown: bool,
     pub output_dir: PathBuf,
     /// Kontener pliku wynikowego (auto = jak źródło).
@@ -317,6 +320,11 @@ impl Opts {
     /// (tam DV/HDR10+ i tak nie są przenoszone).
     pub fn direct_encode(&self, has_dovi: bool, has_hdr10plus: bool) -> bool {
         self.codec != Codec::Hevc || !((has_dovi && !self.no_dv) || (has_hdr10plus && !self.no_hdr10plus))
+    }
+
+    /// Kodowanie wprost do pliku wynikowego: bez DV/HDR10+ albo z metadanymi wstrzykiwanymi w locie.
+    pub fn no_temp_video(&self, has_dovi: bool, has_hdr10plus: bool) -> bool {
+        self.direct_encode(has_dovi, has_hdr10plus) || !self.legacy_inject
     }
 
     pub fn paths_for(&self, input: &Path) -> Paths {

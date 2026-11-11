@@ -13,8 +13,16 @@ use std::{
     time::Duration,
 };
 
+/// Dolby Vision / HDR10+ w locie: koder → wątek z RPU i SEI HDR10+ → ffmpeg składający plik wynikowy.
+struct Live {
+    mux: Child,
+    thread: thread::JoinHandle<anyhow::Result<crate::inject::Stats>>,
+    mux_log: PathBuf,
+}
+
 struct Running {
     child: Child,
+    live: Option<Live>,
     name: String,
     /// Plik zapisywany przez ffmpeg: tymczasowe wideo albo <wynik>.part (tryb bezpośredni).
     output: PathBuf,
@@ -79,6 +87,37 @@ fn direct_out(opts: &Opts, a: &Analysis, p: &Paths, part: &Path) -> OutSpec {
     tail.extend(sv(&["-y"]));
     tail.push(part.to_string_lossy().into());
     OutSpec { streams, tail }
+}
+
+/// Tryb w locie, koder: samo wideo jako surowe HEVC na stdout (czyta je wstrzykiwacz).
+fn live_encoder_out() -> OutSpec {
+    OutSpec { streams: sv(&["-an", "-sn", "-map", "0:v:0"]), tail: sv(&["-f", "hevc", "pipe:1"]) }
+}
+
+/// Tryb w locie, drugi ffmpeg: wideo z metadanymi (Matroska z potoku) + audio i napisy źródła.
+fn live_mux_args(opts: &Opts, a: &Analysis, p: &Paths, part: &Path) -> Vec<String> {
+    let info = probe::stream_codecs(&a.input_file);
+    let mut v = sv(&["-hide_banner", "-nostats", "-loglevel", "warning", "-f", "matroska", "-i", "pipe:0", "-i"]);
+    v.push(a.input_file.to_string_lossy().into());
+    v.extend(sv(&["-map", "0:v:0", "-c:v", "copy"]));
+    let (src, _) = crate::mux::source_streams(opts, a, p.container, 1, true, &info);
+    v.extend(src);
+    v.extend(sv(&["-map_metadata", "1", "-map_chapters", "1"]));
+    match p.container {
+        // hvc1 dla odtwarzaczy Apple / przeglądarek; dvvC w MP4 wymaga -strict unofficial.
+        Container::Mp4 => v.extend(sv(&["-tag:v", "hvc1", "-strict", "unofficial", "-movflags", "+faststart", "-f", "mp4"])),
+        Container::Mkv => v.extend(sv(&["-f", "matroska"])),
+    }
+    v.extend(sv(&["-y"]));
+    v.push(part.to_string_lossy().into());
+    v
+}
+
+/// "24000/1001" → (24000, 1001)
+fn parse_fps(s: &str) -> Option<(u64, u64)> {
+    let (n, d) = s.split_once('/').unwrap_or((s, "1"));
+    let (n, d) = (n.trim().parse::<u64>().ok()?, d.trim().parse::<u64>().ok()?);
+    (n > 0 && d > 0).then_some((n, d))
 }
 
 /// Mapowanie tonów HDR (PQ/HLG, BT.2020) → SDR BT.709 8-bit dla AVC. Krzywa Hable bez desaturacji.
@@ -486,10 +525,24 @@ fn start(
         ));
     }
     let direct = opts.direct_encode(a.has_dovi, a.has_hdr10plus);
+    // DV/HDR10+ w locie (domyślnie): bez pliku tymczasowego wideo i bez dovi_tool / mkvmerge.
+    let live = !direct && !opts.legacy_inject;
+    let fps = if live {
+        let fps = probe::video_fps(&a.input_file).as_deref().and_then(parse_fps);
+        if fps.is_none() {
+            return Err(std::io::Error::other("nie można odczytać liczby klatek na sekundę źródła (ffprobe)"));
+        }
+        fps
+    } else {
+        None
+    };
     let part = PathBuf::from(format!("{}.part", p.output.display()));
     let (write_to, out) = if direct {
         let _ = fs::remove_file(&part);
         (part.clone(), direct_out(opts, a, &p, &part))
+    } else if live {
+        let _ = fs::remove_file(&part);
+        (part.clone(), live_encoder_out())
     } else {
         (p.temp_video.clone(), temp_out(&p.temp_video))
     };
@@ -503,31 +556,128 @@ fn start(
     let eng = opts.engine.label();
     let mode = if direct {
         format!(" — od razu do {}", p.container.ext().to_uppercase())
+    } else if live {
+        format!(" — DV/HDR10+ w locie do {}", p.container.ext().to_uppercase())
     } else {
         String::new()
     };
     panel.set(&a.filename, State::Nvenc, format!("{eng} {slot}/2 — {note} — dekoder: {decoder}{mode}"));
 
     let logf = File::create(&log)?;
-    let child = crate::proc::command("ffmpeg")
-        .args(&args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::from(logf.try_clone()?))
-        .stderr(Stdio::from(logf))
-        .spawn()?;
+    let mut cmd = crate::proc::command("ffmpeg");
+    cmd.args(&args).stdin(Stdio::null()).stderr(Stdio::from(logf.try_clone()?));
+    if live {
+        cmd.stdout(Stdio::piped());
+    } else {
+        cmd.stdout(Stdio::from(logf));
+    }
+    let mut child = cmd.spawn()?;
     proc::register(child.id());
+    let live = match fps {
+        Some(fps) => match start_live(opts, a, &p, &part, &key, rt, fps, &mut child) {
+            Ok(l) => Some(l),
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                proc::unregister(child.id());
+                return Err(e);
+            }
+        },
+        None => None,
+    };
     Ok(Running {
         child,
+        live,
         name: a.filename.clone(),
         output: write_to,
-        final_out: direct.then(|| p.output.clone()),
+        final_out: (direct || fps.is_some()).then(|| p.output.clone()),
         log,
         pf,
     })
 }
 
-fn finish(opts: &Opts, r: Running, status: ExitStatus, panel: &Panel) {
+/// Drugi ffmpeg (składanie pliku) i wątek wstrzykujący metadane między nim a koderem.
+#[allow(clippy::too_many_arguments)]
+fn start_live(
+    opts: &Opts,
+    a: &Analysis,
+    p: &Paths,
+    part: &Path,
+    key: &str,
+    rt: &Runtime,
+    fps: (u64, u64),
+    encoder: &mut Child,
+) -> std::io::Result<Live> {
+    let mux_log = rt.progress_dir.join(format!("{key}.mux.log"));
+    let logf = File::create(&mux_log)?;
+    let mut mux = crate::proc::command("ffmpeg")
+        .args(live_mux_args(opts, a, p, part))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::from(logf.try_clone()?))
+        .stderr(Stdio::from(logf))
+        .spawn()?;
+    proc::register(mux.id());
+    let (Some(enc_out), Some(mux_in)) = (encoder.stdout.take(), mux.stdin.take()) else {
+        let _ = mux.kill();
+        return Err(std::io::Error::other("brak potoku między koderem a ffmpeg"));
+    };
+    let rpu = (a.has_dovi && !opts.no_dv).then(|| p.temp_rpu.clone());
+    let json = (a.has_hdr10plus && !opts.no_hdr10plus).then(|| p.temp_hdr10plus.clone());
+    // Wynik kodera ma zawsze znaczniki PQ (smpte2084) — zgodność warstwy bazowej DV jak dla HDR10.
+    let info = crate::inject::StreamInfo { fps, hlg: false };
+    let thread = thread::spawn(move || {
+        let meta = crate::inject::Metadata::load(rpu.as_deref(), json.as_deref())?;
+        let out = std::io::BufWriter::with_capacity(1 << 20, mux_in);
+        let mut stats = crate::inject::run(enc_out, out, &meta, info)?;
+        stats.converted_p7 = meta.converted_p7;
+        Ok(stats)
+    });
+    Ok(Live { mux, thread, mux_log })
+}
+
+/// Koniec trybu w locie: wątek wstrzykujący, potem ffmpeg składający plik (kończy się po EOF).
+fn finish_live(name: &str, live: Live) -> bool {
+    let Live { mut mux, thread, mux_log } = live;
+    let injected = thread.join().unwrap_or_else(|_| Err(anyhow::anyhow!("wątek wstrzykujący przerwany")));
+    let mux_ok = mux.wait().map(|s| s.success()).unwrap_or(false);
+    proc::unregister(mux.id());
+    let ok = match injected {
+        Ok(st) => {
+            let dv = if st.rpus > 0 { format!(", Dolby Vision poziom {}", st.dv_level) } else { String::new() };
+            let h10 = if st.hdr10plus > 0 { ", HDR10+" } else { "" };
+            plog!(" -> [{name}] metadane w locie: {} klatek {}x{}{dv}{h10}", st.frames, st.width, st.height);
+            if st.converted_p7 {
+                plog!("    RPU profilu 7 przerobione na 8.1 (kodowana jest tylko warstwa bazowa)");
+            }
+            for w in st.warnings() {
+                plog!("    UWAGA: {w}");
+            }
+            true
+        }
+        Err(e) => {
+            plog!(" -> [{name}] BŁĄD wstrzykiwania DV/HDR10+: {e:#}");
+            false
+        }
+    };
+    if !mux_ok {
+        plog!(" -> [{name}] BŁĄD ffmpeg składającego plik:");
+        if let Ok(log) = fs::read_to_string(&mux_log) {
+            let lines: Vec<&str> = log.lines().collect();
+            for l in &lines[lines.len().saturating_sub(12)..] {
+                plog!("    {l}");
+            }
+        }
+    }
+    ok && mux_ok
+}
+
+fn finish(opts: &Opts, mut r: Running, status: ExitStatus, panel: &Panel) {
     proc::unregister(r.child.id());
+    let live = r.live.is_some();
+    let live_ok = match r.live.take() {
+        Some(l) => finish_live(&r.name, l),
+        None => true,
+    };
 
     if proc::cancelled() {
         // Częściowy plik nie może zostać uznany za ukończony etap przy resume.
@@ -535,7 +685,7 @@ fn finish(opts: &Opts, r: Running, status: ExitStatus, panel: &Panel) {
         panel.set(&r.name, State::Waiting, "Przerwano");
         return;
     }
-    if status.success() && result_valid(opts, &r.output, &r.pf) {
+    if status.success() && live_ok && result_valid(opts, &r.output, &r.pf) {
         if let Some(fin) = &r.final_out {
             // Tryb bezpośredni: gotowy plik wynikowy dopiero po pełnym zapisie (.part → nazwa docelowa).
             if let Err(e) = fs::rename(&r.output, fin) {
@@ -543,7 +693,8 @@ fn finish(opts: &Opts, r: Running, status: ExitStatus, panel: &Panel) {
                 plog!(" -> ffmpeg [{}]: BŁĄD zapisu pliku wynikowego: {e}", r.name);
                 return;
             }
-            panel.set(&r.name, State::NvencDone, "Zakodowano od razu do pliku wynikowego");
+            let note = if live { "Zakodowano z DV/HDR10+ w locie do pliku wynikowego" } else { "Zakodowano od razu do pliku wynikowego" };
+            panel.set(&r.name, State::NvencDone, note);
             plog!(" -> ffmpeg [{}]: ZAKOŃCZONY + PLIK OK (bez plików tymczasowych)", r.name);
         } else {
             panel.set(&r.name, State::NvencDone, format!("{} zakończony i zweryfikowany", opts.engine.label()));
@@ -589,6 +740,12 @@ fn abort_all(running: &mut Vec<Running>, panel: &Panel) {
         let _ = r.child.kill();
         let _ = r.child.wait();
         proc::unregister(r.child.id());
+        if let Some(mut l) = r.live.take() {
+            let _ = l.mux.kill();
+            let _ = l.mux.wait();
+            proc::unregister(l.mux.id());
+            let _ = l.thread.join();
+        }
         let _ = fs::remove_file(&r.output);
         panel.set(&r.name, State::Waiting, "Przerwano");
     }
