@@ -95,8 +95,9 @@ po lewej pliki, po prawej kolejkę kodowania.
 | `+` `-` `*` | zaznacz wszystko / wyczyść / odwróć |
 | F2 | informacje o pliku (MediaInfo, w stylu widoku „Easy”): kontener, rozmiar, czas, każdy strumień wideo/audio/napisów w jednej linii; ↑↓ przewijanie, Esc zamyka |
 | F3 | odtwórz plik (lewy panel) lub pozycję kolejki w [mpv](https://mpv.io) — tylko w TUI i w środowisku graficznym (X11/Wayland, Windows). mpv jest dołączony do paczek; przy buildzie ze źródeł używany jest mpv z systemu |
-| F4 | zmień nazwę pliku lub katalogu w lewym panelu (kursor stoi przed rozszerzeniem — wygodne dopisanie np. `_v2`) |
+| F4 | zmień nazwę pliku lub katalogu w lewym panelu (kursor stoi przed rozszerzeniem — wygodne dopisanie np. `_v2`); przy kilku zaznaczonych plikach albo po Tab — **zmiana nazw wielu plików** (niżej) |
 | F5 | dodaj zaznaczone do kolejki (katalog = wszystkie filmy w nim) |
+| Ctrl+F | **znajdź plik** po fragmencie nazwy (niżej) |
 | F6 | usuń zaznaczone (lub bieżący) pliki i katalogi z dysku w lewym panelu — po potwierdzeniu; przy katalogach okno ostrzega, ile plików i GB zniknie, potwierdzenie: Enter lub T, anulowanie: Esc lub N; gdy brakuje uprawnień, okno wyjaśnia, czego brakuje (właściciel, prawa zapisu) i podaje polecenie naprawy; katalogu głównego i domowego nie usuwa |
 | F7 | opcje |
 | F8 / Del | wyjmij z kolejki (plik zostaje na dysku) |
@@ -108,6 +109,20 @@ po lewej pliki, po prawej kolejkę kodowania.
 U góry lewego panelu, przypięte i oddzielone linią od plików, są dyski — zawsze widoczne, niezależnie od przewinięcia:
 na Windows litery z etykietami woluminów, na Linuksie zamontowane systemy plików (dyski, pendrive'y w `/run/media`,
 udziały sieciowe, np. SMB z fstab) z etykietą; obok rozmiar i wolne miejsce. Enter na dysku przechodzi do niego.
+
+**Ctrl+F — znajdź plik.** Szuka fragmentu nazwy (bez rozróżniania wielkości liter) od katalogu z lewego panelu,
+z podkatalogami albo bez. Dopasowany fragment jest podkreślony; nazwy różniące się tylko wielkością liter (np. `Film.mkv`
+i `film.mkv`) mają różne kolory — na Linuksie mogą leżeć nawet w jednym katalogu, na Windows (NTFS nie rozróżnia
+wielkości liter) tylko w różnych. Wyniki można pokazać w oknie (przewijana lista, zaznaczanie jak w lewym panelu:
+Spacja, klik, Shift+strzałki, `+ - *`; Enter albo podwójny klik dodaje do kolejki, na katalogu — przechodzi do niego)
+i/lub od razu dodać wszystkie znalezione pliki wideo do kolejki. Do kolejki trafiają tylko pliki wideo. Esc zamyka okno,
+ponowne Ctrl+F w tym samym katalogu wraca do wyników.
+
+**F4 — zmiana nazw wielu plików.** Przy kilku zaznaczonych plikach F4 (albo Tab w zwykłym oknie zmiany nazwy) otwiera
+zamianę fragmentów nazw: „Szukaj” (kilka wariantów oddzielonych `|`, np. `{|}` usuwa nawiasy: `{film}.mkv` → `film.mkv`),
+„Zamień na” (puste = usuń), filtr rozszerzenia (np. `mkv`; puste = wszystkie) i opcja zamiany także w rozszerzeniu
+(`.MP4` → `.mp4`). Zakres: zaznaczone pliki, a bez zaznaczenia — wszystkie pliki katalogu z danym rozszerzeniem.
+Podgląd pokazuje starą i nową nazwę; konflikty (nazwa zajęta, ta sama nazwa dla kilku plików) są wyróżnione i pomijane.
 
 **Przeciąganie plików.** Pliki wideo przeciągnięte z menedżera plików (Dolphin, Eksplorator…) na okno programu trafiają
 do kolejki; katalogi i pliki innych typów są pomijane. Terminal przekazuje upuszczone pliki jako wklejone ścieżki —

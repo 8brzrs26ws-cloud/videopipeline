@@ -219,7 +219,252 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                 render_mediainfo(f, area, v);
             }
         }
+        Mode::Find => {
+            if let Some(v) = app.find.as_mut() {
+                render_find(f, area, v);
+            }
+        }
+        Mode::RenameMany => {
+            if let Some(r) = app.rename_many.as_mut() {
+                render_rename_many(f, area, r);
+            }
+        }
     }
+}
+
+/// Pole tekstowe: przewijane tak, żeby kursor był widoczny; kursor tylko w aktywnym polu.
+fn input_spans(input: &crate::app::TextInput, w: usize, focused: bool) -> Vec<Span<'static>> {
+    let chars = &input.chars;
+    let start = input.cursor.saturating_sub(w.saturating_sub(1));
+    let mut spans = vec![];
+    for i in start..start + w {
+        let c = chars.get(i).copied().unwrap_or(' ');
+        let style = if focused && i == input.cursor {
+            Style::default().bg(col(TEXT)).fg(col(DLG_BG))
+        } else {
+            Style::default().bg(col(CURSOR_INACTIVE)).fg(col(TEXT))
+        };
+        spans.push(Span::styled(c.to_string(), style));
+    }
+    spans
+}
+
+/// Etykieta pola formularza: podświetlona, gdy pole jest aktywne.
+fn field_label(text: &str, w: usize, focused: bool) -> Span<'static> {
+    let style = if focused { bold(TITLE).bg(col(BOX_ENC)) } else { fg(TEXT) };
+    Span::styled(pad(text, w), style)
+}
+
+fn checkbox(text: &str, on: bool, focused: bool) -> Line<'static> {
+    let mark = if on { "[x] " } else { "[ ] " };
+    let style = if focused { bold(TITLE).bg(col(BOX_ENC)) } else { fg(TEXT) };
+    Line::from(vec![Span::raw(" "), Span::styled(format!("{mark}{text}"), style)])
+}
+
+/// Kolory nazw różniących się tylko wielkością liter (wariant 1, 2, …).
+const CASE_COLORS: [Rgb; 4] = [(0x6e, 0xc5, 0xd6), (0xe0, 0xa0, 0x5a), (0xc0, 0x8f, 0xe0), (0x8f, 0xd4, 0x8b)];
+
+/// Ctrl+F: formularz u góry, pod linią przewijane wyniki z podkreślonym dopasowaniem.
+fn render_find(f: &mut Frame, area: Rect, v: &mut crate::find::FindView) {
+    use crate::find::{F_AUTO, F_INPUT, F_RECURSIVE, F_RESULTS, F_SHOW};
+    let w = area.width.saturating_sub(6).clamp(50, 150);
+    let h = area.height.saturating_sub(2).max(14);
+    let rect = centered(area, w, h);
+    f.render_widget(Clear, rect);
+    let block = dialog_block("Znajdź plik", BOX_ENC);
+    let inner = block.inner(rect);
+    f.render_widget(block, rect);
+    let iw = inner.width as usize;
+
+    let rows = Layout::vertical([
+        Constraint::Length(5), // formularz
+        Constraint::Length(1), // stan
+        Constraint::Length(1), // linia
+        Constraint::Min(1),    // wyniki
+        Constraint::Length(1), // podpowiedź
+    ])
+    .split(inner);
+    v.form_area = rows[0];
+
+    let label_w = 17;
+    let mut input_line = vec![Span::raw(" "), field_label("Nazwa zawiera:", label_w, v.field == F_INPUT)];
+    input_line.extend(input_spans(&v.input, iw.saturating_sub(label_w + 3), v.field == F_INPUT));
+    let form = vec![
+        Line::from(vec![
+            Span::styled(" Szukaj w:        ", fg(DIM)),
+            Span::styled(tail(&v.root.display().to_string(), iw.saturating_sub(19)), fg(TEXT)),
+        ]),
+        Line::from(input_line),
+        checkbox("Szukaj także w podkatalogach", v.recursive, v.field == F_RECURSIVE),
+        checkbox("Pokaż wyniki wyszukiwania w oknie", v.show, v.field == F_SHOW),
+        checkbox("Dodaj znalezione pliki wideo do kolejki automatycznie", v.auto_add, v.field == F_AUTO),
+    ];
+    f.render_widget(Paragraph::new(form), rows[0]);
+
+    // Stan wyszukiwania.
+    let videos = v.hits.iter().filter(|h| h.is_video()).count();
+    let state = if v.searching {
+        let dots = ".".repeat((v.started.map(|t| t.elapsed().as_millis() / 400).unwrap_or(0) % 4) as usize);
+        format!(" Szukam{dots}  przeszukano: {}  znaleziono: {}", v.scanned, v.hits.len())
+    } else if v.query.is_empty() {
+        " Wpisz fragment nazwy i naciśnij Enter".to_string()
+    } else {
+        let mut s = format!(
+            " „{}”: znaleziono {} (wideo: {videos}), przeszukano {}",
+            v.query,
+            v.hits.len(),
+            v.scanned
+        );
+        if v.truncated {
+            s.push_str(" — pokazano pierwsze 5000");
+        }
+        s
+    };
+    let mut st = vec![Span::styled(trunc(&state, iw), fg(if v.searching { G_MID } else { TEXT }))];
+    if !v.info.is_empty() {
+        st.push(Span::styled(format!(" · {}", trunc(&v.info, iw.saturating_sub(state.chars().count() + 3))), fg(G_LOW)));
+    }
+    f.render_widget(Paragraph::new(Line::from(st)), rows[1]);
+    let title = format!(" Wyniki · zaznaczone: {} ", v.marked.len());
+    let rule = format!("──{title}{}", "─".repeat(iw.saturating_sub(title.chars().count() + 2)));
+    f.render_widget(Paragraph::new(Line::from(Span::styled(rule, fg(DIM)))), rows[2]);
+
+    v.list_area = if v.show { rows[3] } else { Rect::default() };
+    v.page = rows[3].height as usize;
+    if v.show {
+        let size_w = 8;
+        let name_w = iw.saturating_sub(size_w + 4);
+        let items: Vec<ListItem> = v
+            .hits
+            .iter()
+            .enumerate()
+            .map(|(i, h)| {
+                let marked = v.marked.contains(&i);
+                let base = if marked {
+                    bold(G_MID)
+                } else if h.is_dir {
+                    bold(TITLE)
+                } else if h.variant > 0 {
+                    fg(CASE_COLORS[(h.variant - 1) % CASE_COLORS.len()])
+                } else if h.is_video() {
+                    fg(TEXT)
+                } else {
+                    fg(DIM)
+                };
+                let mark = if marked { "▪" } else { " " };
+                let dir = if h.rel_dir.is_empty() { String::new() } else { format!("{}{}", h.rel_dir, std::path::MAIN_SEPARATOR) };
+                let prefix = if h.is_dir { "/" } else { "" };
+                // Nazwa z podkreślonym dopasowaniem; katalog nadrzędny szarym, skrócony od lewej.
+                let name: Vec<char> = h.name.chars().collect();
+                let (a, b) = (h.mstart.min(name.len()), (h.mstart + h.mlen).min(name.len()));
+                let name_len = prefix.len() + name.len();
+                let dir_room = name_w.saturating_sub(name_len + 1);
+                let dir_txt = if dir.chars().count() > dir_room { tail(&dir, dir_room) } else { dir };
+                let mut spans = vec![
+                    Span::styled(mark.to_string(), bold(G_MID)),
+                    Span::styled(dir_txt.clone(), fg(DIM)),
+                    Span::styled(format!("{prefix}{}", name[..a].iter().collect::<String>()), base),
+                    Span::styled(name[a..b].iter().collect::<String>(), base.add_modifier(Modifier::UNDERLINED | Modifier::BOLD)),
+                    Span::styled(name[b..].iter().collect::<String>(), base),
+                ];
+                let used = 1 + dir_txt.chars().count() + name_len;
+                spans.push(Span::raw(" ".repeat(name_w.saturating_sub(used) + 1)));
+                let size = if h.is_dir { "<KAT>".to_string() } else { human(h.size) };
+                spans.push(Span::styled(pad_left(&size, size_w), fg(DIM)));
+                ListItem::new(Line::from(spans))
+            })
+            .collect();
+        let hl = cursor_style(v.field == F_RESULTS);
+        f.render_stateful_widget(List::new(items).highlight_style(hl), rows[3], &mut v.state);
+    } else {
+        let msg = " Wyniki ukryte (opcja „Pokaż wyniki wyszukiwania w oknie”).";
+        f.render_widget(Paragraph::new(Span::styled(msg, fg(DIM))), rows[3]);
+    }
+    let hint = if v.field == F_RESULTS {
+        " Spacja/klik — zaznacz · + - * · Enter/2×klik — do kolejki (katalog: przejdź) · F5 — dodaj zaznaczone · Tab · Esc"
+    } else {
+        " Enter — szukaj · Tab/↑↓ — pole · Spacja — przełącz · Esc — zamknij (Ctrl+F wraca do wyników)"
+    };
+    f.render_widget(Paragraph::new(Span::styled(trunc(hint, iw), fg(G_MID))), rows[4]);
+}
+
+/// F4 dla wielu plików: pola szukaj / zamień / rozszerzenie i podgląd zmian.
+fn render_rename_many(f: &mut Frame, area: Rect, r: &mut crate::rename_many::RenameMany) {
+    use crate::rename_many::{R_EXT, R_FIND, R_REPLACE, R_WITH_EXT};
+    let w = area.width.saturating_sub(6).clamp(50, 130);
+    let h = area.height.saturating_sub(4).max(14);
+    let rect = centered(area, w, h);
+    f.render_widget(Clear, rect);
+    let block = dialog_block("Zmień nazwy wielu plików", BOX_QUEUE);
+    let inner = block.inner(rect);
+    f.render_widget(block, rect);
+    let iw = inner.width as usize;
+    let rows = Layout::vertical([
+        Constraint::Length(6),
+        Constraint::Length(1),
+        Constraint::Min(1),
+        Constraint::Length(1),
+    ])
+    .split(inner);
+
+    let label_w = 15;
+    let in_w = iw.saturating_sub(label_w + 3).min(40);
+    let field = |label: &str, inp: &crate::app::TextInput, idx: usize, help: &str| {
+        let mut l = vec![Span::raw(" "), field_label(label, label_w, r.field == idx)];
+        l.extend(input_spans(inp, in_w, r.field == idx));
+        l.push(Span::styled(format!("  {help}"), fg(DIM)));
+        Line::from(l)
+    };
+    let scope = if r.marked.is_empty() {
+        format!("pliki w {} ({} w zakresie)", tail(&r.dir.display().to_string(), iw.saturating_sub(40)), r.candidates)
+    } else {
+        format!("zaznaczone pliki ({} w zakresie)", r.candidates)
+    };
+    let form = vec![
+        Line::from(vec![Span::styled(" Zakres: ", fg(DIM)), Span::styled(scope, fg(TEXT))]),
+        field("Szukaj:", &r.find, R_FIND, "kilka wariantów: {|}"),
+        field("Zamień na:", &r.replace, R_REPLACE, "puste = usuń"),
+        field("Rozszerzenie:", &r.ext, R_EXT, "np. mkv; puste = wszystkie"),
+        checkbox("Zamieniaj także w rozszerzeniu (np. .MP4 → .mp4)", r.with_ext, r.field == R_WITH_EXT),
+        Line::default(),
+    ];
+    f.render_widget(Paragraph::new(form), rows[0]);
+
+    let conflicts = r.conflicts();
+    let title = format!(" Podgląd: zmian {}{} ", r.plans.len(), if conflicts > 0 { format!(", konfliktów {conflicts} (zostaną pominięte)") } else { String::new() });
+    let rule = format!("──{title}{}", "─".repeat(iw.saturating_sub(title.chars().count() + 2)));
+    f.render_widget(Paragraph::new(Span::styled(rule, fg(if conflicts > 0 { G_HIGH } else { DIM }))), rows[1]);
+
+    r.page = rows[2].height as usize;
+    let half = iw.saturating_sub(5) / 2;
+    let lines: Vec<Line> = r
+        .plans
+        .iter()
+        .skip(r.scroll)
+        .take(rows[2].height as usize)
+        .map(|p| {
+            let (style, note) = match &p.problem {
+                Some(why) => (fg(G_HIGH), format!("  ({why})")),
+                None => (fg(TEXT), String::new()),
+            };
+            Line::from(vec![
+                Span::styled(format!(" {}", pad(&p.old, half)), fg(DIM)),
+                Span::styled(" → ", fg(G_MID)),
+                Span::styled(trunc(&format!("{}{note}", p.new), half), style),
+            ])
+        })
+        .collect();
+    let body = if r.plans.is_empty() {
+        vec![Line::from(Span::styled(
+            if r.find.chars.is_empty() { " Wpisz w „Szukaj” fragment nazwy do zamiany." } else { " Żadna nazwa się nie zmieni." },
+            fg(DIM),
+        ))]
+    } else {
+        lines
+    };
+    f.render_widget(Paragraph::new(body), rows[2]);
+    let hint = " Enter — zmień nazwy · Tab/↑↓ — pole · Spacja — przełącz · PgUp/PgDn — podgląd · Esc — anuluj";
+    f.render_widget(Paragraph::new(Span::styled(trunc(hint, iw), fg(G_MID))), rows[3]);
 }
 
 /// Przesunięcie (w znakach) przewijanej nazwy: postój 1 s, przewijanie ~8 znaków/s, postój 1 s, od nowa.
@@ -565,7 +810,7 @@ fn render_options(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_help(f: &mut Frame, area: Rect) {
-    let rect = centered(area, 68, 27);
+    let rect = centered(area, 68, 29);
     f.render_widget(Clear, rect);
     let block = dialog_block("Pomoc", BOX_ALL);
     let inner = block.inner(rect);
@@ -587,8 +832,9 @@ fn render_help(f: &mut Frame, area: Rect) {
         k("Backspace", "katalog wyżej"),
         k("F2", "informacje o pliku (MediaInfo); prawy przycisk myszy też"),
         k("F3", "odtwórz plik w mpv (wymaga środowiska graficznego)"),
-        k("F4", "zmień nazwę pliku/katalogu (lewy panel)"),
+        k("F4", "zmień nazwę; kilka zaznaczonych / Tab — wiele naraz"),
         k("F5", "dodaj zaznaczone (lub bieżący) do kolejki"),
+        k("Ctrl+F", "znajdź plik po nazwie (bieżący katalog / podkatalogi)"),
         k("F6", "usuń zaznaczone pliki/katalogi z dysku (lewy panel)"),
         k("F7", "opcje: kodek i karta (NVENC/QSV/VAAPI), audio, analizy…"),
         k("F8 / Del", "usuń zaznaczone (lub bieżący) z kolejki"),
@@ -684,7 +930,7 @@ fn render_rename(f: &mut Frame, area: Rect, r: &crate::app::RenameCtx) {
         Line::default(),
         Line::from(spans),
         Line::default(),
-        Line::from(Span::styled(" Enter — zapisz · Esc — anuluj · ←→ Home End — kursor", fg(G_MID))),
+        Line::from(Span::styled(" Enter — zapisz · Tab — wiele plików · Esc — anuluj · ←→ Home End", fg(G_MID))),
     ];
     f.render_widget(Paragraph::new(lines), inner);
 }

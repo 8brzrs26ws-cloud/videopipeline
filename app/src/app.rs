@@ -1,5 +1,7 @@
 //! Stan aplikacji TUI i obsługa klawiszy (styl Midnight Commandera).
 use crate::{
+    find::{FindView, F_AUTO, F_INPUT, F_RECURSIVE, F_RESULTS, F_SHOW},
+    rename_many::{RenameMany, R_FIELDS, R_WITH_EXT},
     browser::{self, AddResult, Browser, Queue},
     render,
 };
@@ -54,6 +56,10 @@ pub enum Mode {
     MediaInfo,
     /// Okienko z komunikatem (np. dlaczego nie da się usunąć pliku)
     Message,
+    /// Ctrl+F: wyszukiwanie plików
+    Find,
+    /// F4 dla wielu plików: zamiana fragmentów nazw
+    RenameMany,
 }
 
 /// Okienko F2: raport MediaInfo (albo błąd) i przewinięcie.
@@ -147,7 +153,7 @@ impl TextInput {
     }
 
     /// true = klawisz obsłużony (edycja albo ruch kursora).
-    fn key(&mut self, code: KeyCode) -> bool {
+    pub(crate) fn key(&mut self, code: KeyCode) -> bool {
         match code {
             KeyCode::Char(c) => {
                 self.chars.insert(self.cursor, c);
@@ -228,6 +234,10 @@ pub struct App {
     pub force_redraw: bool,
     /// Okienko komunikatu: tytuł i linie
     pub message: Option<(String, Vec<String>)>,
+    /// Ctrl+F: okno wyszukiwania (zostaje po zamknięciu — ponowne Ctrl+F wraca do wyników)
+    pub find: Option<FindView>,
+    /// F4 dla wielu plików
+    pub rename_many: Option<RenameMany>,
 }
 
 impl App {
@@ -258,6 +268,8 @@ impl App {
             marquee: Marquee { key: String::new(), since: Instant::now() },
             force_redraw: false,
             message: None,
+            find: None,
+            rename_many: None,
         };
         if !initial.is_empty() {
             app.add_paths(initial);
@@ -477,6 +489,8 @@ impl App {
             Mode::ConfirmQuit => self.key_confirm(k, true),
             Mode::ConfirmDelete => self.key_confirm_delete(k),
             Mode::Rename => self.key_rename(k),
+            Mode::Find => self.key_find(k),
+            Mode::RenameMany => self.key_rename_many(k),
             Mode::MediaInfo => self.key_mediainfo(k),
             Mode::Message => {
                 if matches!(k.code, KeyCode::Enter | KeyCode::Esc | KeyCode::Char(' ') | KeyCode::F(10)) {
@@ -496,6 +510,10 @@ impl App {
     }
 
     fn key_normal(&mut self, k: KeyEvent) {
+        if k.modifiers.contains(KeyModifiers::CONTROL) && matches!(k.code, KeyCode::Char('f' | 'F')) {
+            self.begin_find();
+            return;
+        }
         // Shift + strzałki/PgUp/PgDn/Home/End: zaznaczanie wielu plików (jak w MC).
         if k.modifiers.contains(KeyModifiers::SHIFT) {
             let page = self.page();
@@ -631,6 +649,20 @@ impl App {
     pub fn on_mouse(&mut self, m: MouseEvent) {
         let inside = |r: Rect| m.column >= r.x && m.column < r.x + r.width && m.row >= r.y && m.row < r.y + r.height;
         match self.mode {
+            Mode::Find => {
+                self.mouse_find(m);
+                return;
+            }
+            Mode::RenameMany => {
+                if let Some(r) = self.rename_many.as_mut() {
+                    match m.kind {
+                        MouseEventKind::ScrollDown => r.scroll = (r.scroll + 3).min(r.plans.len().saturating_sub(1)),
+                        MouseEventKind::ScrollUp => r.scroll = r.scroll.saturating_sub(3),
+                        _ => {}
+                    }
+                }
+                return;
+            }
             Mode::MediaInfo => {
                 if let Some(v) = self.mediainfo.as_mut() {
                     match m.kind {
@@ -807,12 +839,268 @@ impl App {
             self.status_msg = "F4 zmienia nazwę w lewym panelu".into();
             return;
         }
+        // Kilka zaznaczonych plików: zamiana fragmentów nazw w nich wszystkich.
+        let marked: Vec<PathBuf> = self.browser.marked.iter().filter(|p| p.is_file()).cloned().collect();
+        if marked.len() >= 2 {
+            self.rename_many = Some(RenameMany::new(self.browser.cwd.clone(), marked, ""));
+            self.mode = Mode::RenameMany;
+            return;
+        }
         let Some(e) = self.browser.selected().filter(|e| !e.is_special()) else {
             self.status_msg = "Nic nie wybrano".into();
             return;
         };
         self.rename = Some(RenameCtx { from: e.path.clone(), input: TextInput::for_filename(&e.name) });
         self.mode = Mode::Rename;
+    }
+
+    /// Tab w oknie zmiany nazwy: wiele plików katalogu z rozszerzeniem bieżącego pliku.
+    fn rename_to_many(&mut self) {
+        let Some(ctx) = self.rename.take() else { return };
+        let ext = ctx.from.extension().map(|e| e.to_string_lossy().to_string()).unwrap_or_default();
+        let marked: Vec<PathBuf> = self.browser.marked.iter().filter(|p| p.is_file()).cloned().collect();
+        self.rename_many = Some(RenameMany::new(self.browser.cwd.clone(), marked, &ext));
+        self.mode = Mode::RenameMany;
+    }
+
+    fn key_rename_many(&mut self, k: KeyEvent) {
+        let Some(r) = self.rename_many.as_mut() else {
+            self.mode = Mode::Normal;
+            return;
+        };
+        let back = k.code == KeyCode::BackTab || (k.code == KeyCode::Tab && k.modifiers.contains(KeyModifiers::SHIFT));
+        match k.code {
+            KeyCode::Esc => {
+                self.rename_many = None;
+                self.mode = Mode::Normal;
+            }
+            KeyCode::Tab | KeyCode::BackTab | KeyCode::Up | KeyCode::Down => {
+                let up = back || k.code == KeyCode::Up;
+                r.field = if up { (r.field + R_FIELDS - 1) % R_FIELDS } else { (r.field + 1) % R_FIELDS };
+            }
+            KeyCode::PageDown => r.scroll = (r.scroll + r.page).min(r.plans.len().saturating_sub(1)),
+            KeyCode::PageUp => r.scroll = r.scroll.saturating_sub(r.page),
+            KeyCode::Char(' ') if r.field == R_WITH_EXT => {
+                r.with_ext = !r.with_ext;
+                r.update();
+            }
+            KeyCode::Enter => {
+                if r.plans.is_empty() {
+                    self.status_msg = "Brak zmian — wpisz, co zamienić".into();
+                    return;
+                }
+                let (done, errors) = r.execute();
+                for (from, to) in &done {
+                    self.queue.rename_path(from, to);
+                    if self.browser.marked.remove(from) {
+                        self.browser.marked.insert(to.clone());
+                    }
+                }
+                let skipped = r.conflicts();
+                self.browser.reload(None);
+                self.rename_many = None;
+                self.mode = Mode::Normal;
+                self.status_msg = format!("Zmieniono nazwy: {}", done.len());
+                if skipped > 0 {
+                    self.status_msg.push_str(&format!(" · pominięto (konflikt): {skipped}"));
+                }
+                if !errors.is_empty() {
+                    let mut lines = vec![format!("Nie udało się zmienić nazw: {}", errors.len()), String::new()];
+                    lines.extend(errors.into_iter().take(20));
+                    self.message = Some(("Zmiana nazw".into(), lines));
+                    self.mode = Mode::Message;
+                }
+            }
+            code => {
+                if let Some(inp) = r.input_mut() {
+                    if inp.key(code) {
+                        r.update();
+                    }
+                }
+            }
+        }
+    }
+
+    // ---------------------------------------------------------- Ctrl+F: szukaj ---
+
+    fn begin_find(&mut self) {
+        if self.focus != Focus::Left {
+            self.status_msg = "Ctrl+F szuka plików od katalogu w lewym panelu".into();
+            return;
+        }
+        let cwd = self.browser.cwd.clone();
+        // Ten sam katalog: wróć do poprzedniego wyszukiwania i wyników.
+        if self.find.as_ref().is_none_or(|f| f.root != cwd) {
+            self.find = Some(FindView::new(cwd));
+        }
+        if let Some(f) = self.find.as_mut() {
+            f.field = F_INPUT;
+        }
+        self.mode = Mode::Find;
+    }
+
+    /// Wyniki z wątku wyszukiwania (co klatkę) i automatyczne dodanie do kolejki.
+    pub fn poll_find(&mut self) {
+        let Some(add) = self.find.as_mut().and_then(|f| f.poll()) else { return };
+        let n = add.len();
+        self.add_paths(add);
+        if let Some(f) = self.find.as_mut() {
+            f.info = format!("Dodano automatycznie do kolejki: {n} plików wideo · {}", self.status_msg);
+        }
+    }
+
+    fn find_add(&mut self) {
+        let Some(f) = self.find.as_mut() else { return };
+        let (add, skip) = f.take_for_queue();
+        if add.is_empty() {
+            f.info = "Do kolejki można dodać tylko pliki wideo".into();
+            return;
+        }
+        self.add_paths(add);
+        let mut msg = self.status_msg.clone();
+        if skip > 0 {
+            msg.push_str(&format!(", pominięto (nie wideo): {skip}"));
+        }
+        if let Some(f) = self.find.as_mut() {
+            f.info = msg;
+        }
+    }
+
+    /// Enter / podwójne kliknięcie na wyniku: katalog — przejdź do niego w lewym panelu;
+    /// plik — zaznaczone + bieżący do kolejki.
+    fn find_activate(&mut self) {
+        let Some(f) = self.find.as_mut() else { return };
+        let Some(h) = f.selected() else { return };
+        if h.is_dir {
+            let p = h.path.clone();
+            f.stop();
+            self.browser.cwd = p;
+            self.browser.marked.clear();
+            self.browser.rest = Default::default();
+            self.browser.state.select(None);
+            self.browser.reload(None);
+            self.mode = Mode::Normal;
+            return;
+        }
+        if let Some(i) = f.state.selected() {
+            if h_is_file(f, i) {
+                f.marked.insert(i);
+            }
+        }
+        self.find_add();
+    }
+
+    fn key_find(&mut self, k: KeyEvent) {
+        let Some(f) = self.find.as_mut() else {
+            self.mode = Mode::Normal;
+            return;
+        };
+        let shift = k.modifiers.contains(KeyModifiers::SHIFT);
+        let back = k.code == KeyCode::BackTab || (k.code == KeyCode::Tab && shift);
+        let has_results = f.show && !f.hits.is_empty();
+        let fields = if has_results { F_RESULTS + 1 } else { F_RESULTS };
+        match k.code {
+            KeyCode::Esc => {
+                f.stop();
+                self.mode = Mode::Normal;
+                return;
+            }
+            KeyCode::Tab | KeyCode::BackTab => {
+                f.field = if back { (f.field + fields - 1) % fields } else { (f.field + 1) % fields };
+                return;
+            }
+            _ => {}
+        }
+        if f.field == F_RESULTS {
+            let page = f.page.max(1) as isize;
+            if shift && matches!(k.code, KeyCode::Up | KeyCode::Down | KeyCode::PageUp | KeyCode::PageDown) {
+                let d = match k.code {
+                    KeyCode::Up => -1,
+                    KeyCode::Down => 1,
+                    KeyCode::PageUp => -page,
+                    _ => page,
+                };
+                f.select_move(d);
+                return;
+            }
+            match k.code {
+                KeyCode::Up if f.state.selected() == Some(0) => f.field = F_AUTO,
+                KeyCode::Up => f.move_by(-1),
+                KeyCode::Down => f.move_by(1),
+                KeyCode::PageUp => f.move_by(-page),
+                KeyCode::PageDown => f.move_by(page),
+                KeyCode::Home => f.move_by(-1_000_000),
+                KeyCode::End => f.move_by(1_000_000),
+                KeyCode::Insert | KeyCode::Char(' ') => {
+                    f.toggle_here();
+                    f.move_by(1);
+                }
+                KeyCode::Char(c @ ('+' | '-' | '*')) => f.marks(c),
+                KeyCode::F(5) => self.find_add(),
+                KeyCode::Enter => self.find_activate(),
+                _ => {}
+            }
+            return;
+        }
+        match k.code {
+            KeyCode::Enter => f.start(),
+            KeyCode::Up => f.field = f.field.saturating_sub(1),
+            KeyCode::Down if f.field + 1 < fields => f.field += 1,
+            KeyCode::Char(' ') if f.field != F_INPUT => match f.field {
+                F_RECURSIVE => f.recursive = !f.recursive,
+                F_SHOW => f.show = !f.show,
+                _ => f.auto_add = !f.auto_add,
+            },
+            KeyCode::F(5) => self.find_add(),
+            code if f.field == F_INPUT => {
+                f.input.key(code);
+            }
+            _ => {}
+        }
+    }
+
+    /// Mysz w oknie wyszukiwania: klik na wyniku — kursor i zaznaczenie pliku, podwójny klik —
+    /// jak Enter; kółko — przewijanie; klik na przełączniku — zmiana.
+    fn mouse_find(&mut self, m: MouseEvent) {
+        let Some(f) = self.find.as_mut() else { return };
+        let inside = |r: Rect| m.column >= r.x && m.column < r.x + r.width && m.row >= r.y && m.row < r.y + r.height;
+        match m.kind {
+            MouseEventKind::ScrollDown => f.move_by(3),
+            MouseEventKind::ScrollUp => f.move_by(-3),
+            MouseEventKind::Down(MouseButton::Left) if inside(f.list_area) => {
+                let Some(i) = f.index_at((m.row - f.list_area.y) as usize) else { return };
+                f.field = F_RESULTS;
+                f.state.select(Some(i));
+                let now = Instant::now();
+                let double = matches!(f.last_click, Some((j, t)) if j == i && now.duration_since(t) < Duration::from_millis(450));
+                f.last_click = if double { None } else { Some((i, now)) };
+                if double {
+                    self.find_activate();
+                } else {
+                    f.toggle_here();
+                }
+            }
+            MouseEventKind::Down(MouseButton::Left) if inside(f.form_area) => {
+                // Wiersze formularza: 1 — nazwa, 2–4 — przełączniki (wiersz 0 to „Szukaj w”).
+                match (m.row - f.form_area.y) as usize {
+                    1 => f.field = F_INPUT,
+                    2 => {
+                        f.field = F_RECURSIVE;
+                        f.recursive = !f.recursive;
+                    }
+                    3 => {
+                        f.field = F_SHOW;
+                        f.show = !f.show;
+                    }
+                    4 => {
+                        f.field = F_AUTO;
+                        f.auto_add = !f.auto_add;
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
     }
 
     fn key_rename(&mut self, k: KeyEvent) {
@@ -825,6 +1113,7 @@ impl App {
                 self.rename = None;
                 self.mode = Mode::Normal;
             }
+            KeyCode::Tab => self.rename_to_many(),
             KeyCode::Enter => {
                 let name = ctx.input.text().trim().to_string();
                 let from = ctx.from.clone();
@@ -997,6 +1286,11 @@ fn expand_home(s: &str) -> PathBuf {
     videopipeline_core::platform::expand_home(s)
 }
 
+/// Wynik o indeksie `i` to plik (nie katalog).
+fn h_is_file(f: &FindView, i: usize) -> bool {
+    f.hits.get(i).is_some_and(|h| !h.is_dir)
+}
+
 // -------------------------------------------------------------------------
 
 pub fn run(app: &mut App) -> Result<()> {
@@ -1046,6 +1340,7 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
     let mut last_mode = app.mode;
     while !app.quit {
         app.poll_run();
+        app.poll_find();
         // Zamknięcie okienka (F2, F4, F6, F7, F9…) albo Ctrl+L: pełne przerysowanie ekranu.
         // Część terminali (np. Konsole/Yakuake) potrafi zostawić resztki okna, gdy ratatui
         // odświeża tylko zmienione komórki — czyszczenie wymusza narysowanie wszystkiego od nowa.
