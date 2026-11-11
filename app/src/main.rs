@@ -2,6 +2,7 @@
 mod app;
 mod browser;
 mod cli;
+mod dropin;
 mod perm;
 mod player;
 mod render;

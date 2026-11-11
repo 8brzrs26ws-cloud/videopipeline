@@ -109,6 +109,10 @@ U góry lewego panelu, przypięte i oddzielone linią od plików, są dyski — 
 na Windows litery z etykietami woluminów, na Linuksie zamontowane systemy plików (dyski, pendrive'y w `/run/media`,
 udziały sieciowe, np. SMB z fstab) z etykietą; obok rozmiar i wolne miejsce. Enter na dysku przechodzi do niego.
 
+**Przeciąganie plików.** Pliki wideo przeciągnięte z menedżera plików (Dolphin, Eksplorator…) na okno programu trafiają
+do kolejki; katalogi i pliki innych typów są pomijane. Terminal przekazuje upuszczone pliki jako wklejone ścieżki —
+działa w `videopipeline-term`, Konsole (wybierz „Wklej położenie”), kitty, GNOME Terminal i Windows Terminal.
+
 Długa nazwa zaznaczonego pliku, która nie mieści się w kolumnie, przewija się sama, więc da się ją przeczytać
 przy każdym rozmiarze okna.
 

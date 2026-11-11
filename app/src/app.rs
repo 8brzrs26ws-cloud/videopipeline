@@ -16,7 +16,7 @@ use anyhow::Result;
 use ratatui::{
     crossterm::{
         event::{
-            self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
+            self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
             MouseButton, MouseEvent, MouseEventKind,
         },
         execute,
@@ -385,6 +385,23 @@ impl App {
         if clash > 0 {
             self.status_msg.push_str(&format!(", pominięto (ta sama nazwa pliku): {clash}"));
         }
+    }
+
+    /// Pliki przeciągnięte na okno (terminal wkleja ich ścieżki). Do kolejki trafiają tylko pliki
+    /// wideo obsługiwanych typów — katalogi i inne pliki są pomijane. `false` = w tekście nie ma
+    /// ścieżek istniejących plików (zwykłe klawisze albo inny wklejony tekst).
+    pub fn drop_text(&mut self, text: &str) -> bool {
+        let paths = crate::dropin::parse_paths(text);
+        if paths.is_empty() {
+            return false;
+        }
+        let (videos, other): (Vec<PathBuf>, Vec<PathBuf>) =
+            paths.into_iter().partition(|p| p.is_file() && browser::is_video(p));
+        self.add_paths(videos);
+        if !other.is_empty() {
+            self.status_msg.push_str(&format!(" · pominięto (nie plik wideo): {}", other.len()));
+        }
+        true
     }
 
     fn add_from_left(&mut self) {
@@ -987,11 +1004,41 @@ pub fn run(app: &mut App) -> Result<()> {
     let mut terminal = ratatui::init();
     // Mysz: kliknięcia i kółko. (Zaznaczanie tekstu w terminalu działa wtedy z wciśniętym Shift.)
     let _ = execute!(std::io::stdout(), EnableMouseCapture);
+    // Przeciągnięte pliki: terminal wkleja ścieżki — z bracketed paste przychodzą jako Event::Paste.
+    let _ = execute!(std::io::stdout(), EnableBracketedPaste);
     let res = event_loop(&mut terminal, app);
+    let _ = execute!(std::io::stdout(), DisableBracketedPaste);
     let _ = execute!(std::io::stdout(), DisableMouseCapture);
     ratatui::restore();
     proc::kill_all();
     res
+}
+
+/// Zbiera klawisze, które przyszły tuż po `first` (wklejanie przez terminal bez bracketed paste).
+fn key_burst(first: KeyEvent) -> Result<(String, Vec<KeyEvent>)> {
+    let mut keys = vec![first];
+    let mut text = String::new();
+    let push = |text: &mut String, k: &KeyEvent| match k.code {
+        KeyCode::Char(c) => text.push(c),
+        KeyCode::Enter => text.push('\n'),
+        KeyCode::Tab => text.push(' '),
+        _ => {}
+    };
+    push(&mut text, &first);
+    if !matches!(first.code, KeyCode::Char(_)) {
+        return Ok((text, keys));
+    }
+    while event::poll(Duration::from_millis(2))? {
+        match event::read()? {
+            Event::Key(k) if k.kind == KeyEventKind::Press => {
+                push(&mut text, &k);
+                keys.push(k);
+            }
+            Event::Paste(p) => text.push_str(&p),
+            _ => {}
+        }
+    }
+    Ok((text, keys))
 }
 
 fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
@@ -1013,7 +1060,28 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
         let wait = if app.marquee_active() { 120 } else { 200 };
         if event::poll(Duration::from_millis(wait))? {
             match event::read()? {
-                Event::Key(k) if k.kind == KeyEventKind::Press => app.on_key(k),
+                Event::Paste(text) => {
+                    if app.mode == Mode::Normal {
+                        if !app.drop_text(&text) {
+                            app.status_msg = "Wklejony tekst nie jest ścieżką do pliku".into();
+                        }
+                    } else {
+                        // Okno z polem tekstowym (np. F4) — wklejony tekst jak wpisane znaki.
+                        for c in text.chars().filter(|c| !c.is_control()) {
+                            app.on_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+                        }
+                    }
+                }
+                Event::Key(k) if k.kind == KeyEventKind::Press => {
+                    // Bez bracketed paste (konsola Windows) wklejenie to seria znaków w ciągu
+                    // kilku milisekund — rozpoznajemy ją jako upuszczone pliki.
+                    let (text, keys) = key_burst(k)?;
+                    if !(app.mode == Mode::Normal && keys.len() >= 4 && app.drop_text(&text)) {
+                        for k in keys {
+                            app.on_key(k);
+                        }
+                    }
+                }
                 Event::Mouse(m) => app.on_mouse(m),
                 _ => {}
             }
