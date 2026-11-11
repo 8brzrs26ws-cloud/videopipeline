@@ -1,6 +1,6 @@
 [package]
 name = "videopipeline-core"
-version = "0.17.1"
+version = "0.18.0"
 edition = "2021"
 description = "VideoPipeline — pełna logika kodowania (biblioteka dynamiczna)"
 
