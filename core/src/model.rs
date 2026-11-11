@@ -25,8 +25,8 @@ impl State {
     pub fn percent(self) -> f64 {
         match self {
             State::Waiting | State::Error => 0.0,
-            State::Analysis => 5.0,
-            State::Nvenc => 10.0,
+            State::Analysis => 0.0,
+            State::Nvenc => 15.0,
             State::NvencDone | State::Hdr => 75.0,
             State::Hdr10Plus => 78.0,
             State::Dv => 84.0,
@@ -60,6 +60,8 @@ pub struct Item {
     pub duration_us: Option<f64>,
     /// Historia fps do wykresu.
     pub history: Vec<f64>,
+    /// Postęp analizy pliku 0–100 (m.in. odczyt strumienia dla Dolby Vision / HDR10+).
+    pub analysis_pct: Option<f64>,
 }
 
 #[derive(Clone, Default)]
@@ -154,11 +156,12 @@ pub fn enc_progress(it: &Item) -> Option<Enc> {
     Some(Enc { pct: 100.0 * out / total, cur: out / 1e6, dur: total / 1e6, prog })
 }
 
-/// Postęp całego pipeline'u dla pliku (kodowanie zajmuje 10–75%).
+/// Postęp całego pipeline'u dla pliku: analiza 0–15%, kodowanie 15–75%, dalej etapy HDR/audio/mux.
 pub fn overall_pct(it: &Item, enc: &Option<Enc>) -> f64 {
     match (it.state, enc) {
         (State::Done, _) => 100.0,
-        (State::Nvenc, Some(e)) => 10.0 + e.pct.clamp(0.0, 100.0) * 0.65,
+        (State::Analysis, _) => it.analysis_pct.unwrap_or(0.0).clamp(0.0, 100.0) * 0.15,
+        (State::Nvenc, Some(e)) => 15.0 + e.pct.clamp(0.0, 100.0) * 0.60,
         _ => it.state.percent(),
     }
 }
@@ -175,6 +178,7 @@ impl Panel {
             progress_file: None,
             duration_us: None,
             history: Vec::new(),
+            analysis_pct: None,
         });
     }
 
@@ -204,6 +208,11 @@ impl Panel {
 
     pub fn draw_analysis(&self, name: &str, pct: f64, step: &str, note: &str) {
         let mut g = self.lock();
+        // Pasek pliku w kolejce i ALL: postęp analizy (w tym odczytu strumienia dla DV / HDR10+).
+        if let Some(it) = g.items.get_mut(name).filter(|it| it.state == State::Analysis) {
+            it.analysis_pct = Some(pct);
+            it.note = step.to_string();
+        }
         g.title = "ETAP 1/3 — ANALIZA PLIKÓW".into();
         g.analysis = Some(AnalysisView {
             name: name.into(),
