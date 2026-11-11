@@ -1,6 +1,6 @@
 [package]
 name = "videopipeline"
-version = "0.16.0"
+version = "0.17.0"
 edition = "2021"
 description = "VideoPipeline — TUI w stylu Midnight Commandera + tryb skryptowy"
 
