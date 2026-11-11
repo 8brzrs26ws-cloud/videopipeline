@@ -16,7 +16,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph},
     Frame,
 };
 use std::time::{Instant, SystemTime};
@@ -26,6 +26,7 @@ const OPTION_HELP: [&str; OPTION_COUNT] = [
     "Jakość HEVC: NVENC -cq, QSV ICQ, VAAPI QP; mniej = lepsza jakość. ←/→ ±1, PgUp/PgDn ±5.",
     "Jakość AV1: NVENC -cq, QSV ICQ, VAAPI QP×5; mniej = lepsza jakość. ←/→ ±1, PgUp/PgDn ±5.",
     "Tylko Intel QSV: ← szybciej, → wolniej i nieco lepiej. veryslow bywa kilka razy wolniejszy od slow.",
+    "", // wiersz 4: kontener — opis zależny od wyboru (ostrzeżenie dla MP4)
     "Pierwsza polska ścieżka przekodowana do E-AC-3 2.0 192 kb/s.",
     "Bez tego: tylko polska ścieżka audio i brak napisów.",
     "NVIDIA: bilateral_cuda, Intel: vpp_qsv/denoise_vaapi, zapasowo hqdn3d (CPU); tylko SDR 8-bit.",
@@ -252,6 +253,9 @@ fn summary(o: &Opts) -> String {
     let mut parts: Vec<String> = vec![o.codec_label()];
     parts.push(format!("CQ {}", o.cq()));
     parts.push(String::from(if o.pl_eac3 { "audio PL E-AC-3 192k" } else { "audio PL (kopia)" }));
+    if o.container != ContainerChoice::Auto {
+        parts.push(format!("→ {}", o.container.label()));
+    }
     if o.extra {
         parts.push("+EN +napisy".into());
     }
@@ -323,54 +327,67 @@ fn render_left(f: &mut Frame, area: Rect, b: &mut Browser, active: bool, shift: 
     let name_w = (inner.width as usize).saturating_sub(20).max(4);
 
     f.render_widget(Paragraph::new(header_line("Nazwa", "Rozmiar", "Zmodyfikowano", name_w)), parts[0]);
-    b.page = parts[1].height as usize;
+    // Dyski przypięte u góry (zawsze widoczne), pod linią przewijana zawartość katalogu.
+    let list_h = parts[1].height as usize;
+    let pinned_h = b.pinned.min(list_h / 2);
+    b.pinned_shown = pinned_h;
+    let areas = Layout::vertical([Constraint::Length(pinned_h as u16), Constraint::Min(1)]).split(parts[1]);
+    b.page = areas[1].height as usize;
 
     let sel = b.state.selected();
-    let items: Vec<ListItem> = b
-        .entries
+    let item = |i: usize, e: &crate::browser::Entry| -> ListItem<'static> {
+        if e.sep {
+            return ListItem::new(Line::from(Span::styled("─".repeat(name_w + 20), fg(DIM))));
+        }
+        let marked = b.marked.contains(&e.path);
+        let label = entry_label(e);
+        let style = if e.drive.is_some() {
+            bold(G_LOW)
+        } else if e.is_dir {
+            bold(TITLE)
+        } else {
+            fg(TEXT)
+        };
+        let style = if marked { bold(G_MID) } else { style };
+        let label = if Some(i) == sel && shift > 0 { label.chars().skip(shift).collect() } else { label };
+        let (size, date) = if let Some(d) = &e.drive {
+            (
+                d.total.map(human).unwrap_or_else(|| "DYSK".into()),
+                d.free.map(|f| format!("{} wolne", human(f))).unwrap_or_default(),
+            )
+        } else if e.is_up {
+            ("UP--DIR".to_string(), String::new())
+        } else if e.is_dir {
+            ("SUB-DIR".to_string(), e.mtime.map(fmt_time).unwrap_or_default())
+        } else {
+            (human(e.size), e.mtime.map(fmt_time).unwrap_or_default())
+        };
+        ListItem::new(Line::from(vec![
+            Span::styled(pad(&label, name_w), style),
+            Span::styled("│", fg(DIM)),
+            Span::styled(pad_left(&size, 7), fg(TEXT)),
+            Span::styled("│", fg(DIM)),
+            Span::styled(pad(&date, 11), fg(DIM)),
+        ]))
+    };
+
+    if pinned_h > 0 {
+        let top: Vec<ListItem> = b.entries[..pinned_h].iter().enumerate().map(|(i, e)| item(i, e)).collect();
+        let mut st = ListState::default().with_selected(sel.filter(|s| *s < pinned_h));
+        f.render_stateful_widget(List::new(top).highlight_style(cursor_style(active)), areas[0], &mut st);
+    }
+    let rest: Vec<ListItem> = b.entries[b.pinned.min(b.entries.len())..]
         .iter()
         .enumerate()
-        .map(|(i, e)| {
-            if e.sep {
-                // Linia oddzielająca zawartość katalogu od dysków.
-                let head = "── Dyski ";
-                let rest = (name_w + 20).saturating_sub(head.chars().count());
-                return ListItem::new(Line::from(Span::styled(format!("{head}{}", "─".repeat(rest)), fg(DIM))));
-            }
-            let marked = b.marked.contains(&e.path);
-            let label = entry_label(e);
-            let style = if e.drive.is_some() {
-                bold(G_LOW)
-            } else if e.is_dir {
-                bold(TITLE)
-            } else {
-                fg(TEXT)
-            };
-            let style = if marked { bold(G_MID) } else { style };
-            let label = if Some(i) == sel && shift > 0 { label.chars().skip(shift).collect() } else { label };
-            let (size, date) = if let Some(d) = &e.drive {
-                (
-                    d.total.map(human).unwrap_or_else(|| "DYSK".into()),
-                    d.free.map(|f| format!("{} wolne", human(f))).unwrap_or_default(),
-                )
-            } else if e.is_up {
-                ("UP--DIR".to_string(), String::new())
-            } else if e.is_dir {
-                ("SUB-DIR".to_string(), e.mtime.map(fmt_time).unwrap_or_default())
-            } else {
-                (human(e.size), e.mtime.map(fmt_time).unwrap_or_default())
-            };
-            ListItem::new(Line::from(vec![
-                Span::styled(pad(&label, name_w), style),
-                Span::styled("│", fg(DIM)),
-                Span::styled(pad_left(&size, 7), fg(TEXT)),
-                Span::styled("│", fg(DIM)),
-                Span::styled(pad(&date, 11), fg(DIM)),
-            ]))
-        })
+        .map(|(i, e)| item(i + b.pinned, e))
         .collect();
-    let list = List::new(items).highlight_style(cursor_style(active));
-    f.render_stateful_widget(list, parts[1], &mut b.state);
+    // Kursor na dyskach: lista plików zachowuje przewinięcie, tylko bez podświetlenia.
+    let in_rest = sel.and_then(|s| s.checked_sub(b.pinned));
+    let hl = if in_rest.is_some() { cursor_style(active) } else { Style::default() };
+    if in_rest.is_some() {
+        b.rest.select(in_rest);
+    }
+    f.render_stateful_widget(List::new(rest).highlight_style(hl), areas[1], &mut b.rest);
 
     let foot = if let Some(err) = &b.error {
         Span::styled(trunc(err, inner.width as usize), fg(G_HIGH))
@@ -473,7 +490,7 @@ fn render_fkeys(f: &mut Frame, area: Rect) {
 // --------------------------------------------------------------- okienka ---
 
 fn render_options(f: &mut Frame, area: Rect, app: &App) {
-    let rect = centered(area, 78, 21);
+    let rect = centered(area, 78, 22);
     f.render_widget(Clear, rect);
     let block = dialog_block("Opcje videopipeline", BOX_QUEUE);
     let inner = block.inner(rect);
@@ -505,6 +522,7 @@ fn render_options(f: &mut Frame, area: Rect, app: &App) {
                 format!("({}, tylko QSV) < {} >", o.engine.label(), o.qsv_preset)
             },
         ),
+        ("Kontener wyjściowy   (--container)".into(), format!("< {} >", o.container.label())),
         (format!("{} Audio PL → E-AC-3 stereo 192k   (-pleac3)", chk(o.pl_eac3)), String::new()),
         (format!("{} Dodatkowo audio EN + napisy EN i PL   (-da)", chk(o.extra)), String::new()),
         (format!("{} Odszumianie SDR 8-bit   (-d)", chk(o.denoise)), String::new()),
@@ -526,6 +544,14 @@ fn render_options(f: &mut Frame, area: Rect, app: &App) {
     lines.push(Line::default());
     let help = if app.opt_cursor == 0 {
         format!("Wykryte: {}. HEVC: DV/HDR10+; AV1: 10-bit, bez DV/HDR10+.", app.hw.summary())
+    } else if app.opt_cursor == crate::app::OPT_CONTAINER {
+        match o.container {
+            ContainerChoice::Auto => "Jak źródło: .mp4 → MP4, reszta → MKV. Pełne DV i HDR10+ tylko w MKV.".into(),
+            ContainerChoice::Mkv => "MKV: pełne Dolby Vision i HDR10+, wszystkie ścieżki audio i napisy.".into(),
+            ContainerChoice::Mp4 => {
+                "UWAGA: w MP4 Dolby Vision/HDR10+ nie będą pełne — do nich wybierz MKV.".into()
+            }
+        }
     } else {
         OPTION_HELP[app.opt_cursor.min(OPTION_COUNT - 1)].to_string()
     };

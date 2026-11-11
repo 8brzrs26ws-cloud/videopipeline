@@ -208,8 +208,16 @@ impl Entry {
 
 pub struct Browser {
     pub cwd: PathBuf,
+    /// Najpierw dyski i separator (`pinned` pozycji, przypięte u góry panelu), potem zawartość katalogu.
     pub entries: Vec<Entry>,
+    /// Bieżąca pozycja (indeks w `entries`).
     pub state: ListState,
+    /// Liczba pozycji przypiętych u góry (dyski + separator); 0 = brak.
+    pub pinned: usize,
+    /// Przewijana część listy (zawartość katalogu) — indeksy od `pinned`.
+    pub rest: ListState,
+    /// Ile przypiętych wierszy zmieściło się w ostatnim rysowaniu (obsługa myszy).
+    pub pinned_shown: usize,
     pub marked: BTreeSet<PathBuf>,
     pub error: Option<String>,
     pub page: usize,
@@ -221,6 +229,9 @@ impl Browser {
             cwd: start,
             entries: vec![],
             state: ListState::default(),
+            pinned: 0,
+            rest: ListState::default(),
+            pinned_shown: 0,
             marked: BTreeSet::new(),
             error: None,
             page: 10,
@@ -267,7 +278,33 @@ impl Browser {
         dirs.sort_by_key(|e| e.name.to_lowercase());
         files.sort_by_key(|e| e.name.to_lowercase());
 
+        // Na górze, przypięte i oddzielone linią: dyski (Windows) / zamontowane systemy plików (Linux).
         let mut entries = vec![];
+        for (path, name, info) in drives() {
+            entries.push(Entry {
+                name,
+                path,
+                is_dir: true,
+                is_up: false,
+                size: info.total.unwrap_or(0),
+                mtime: None,
+                drive: Some(info),
+                sep: false,
+            });
+        }
+        if !entries.is_empty() {
+            entries.push(Entry {
+                name: String::new(),
+                path: PathBuf::new(),
+                is_dir: false,
+                is_up: false,
+                size: 0,
+                mtime: None,
+                drive: None,
+                sep: true,
+            });
+        }
+        self.pinned = entries.len();
         if let Some(parent) = self.cwd.parent() {
             entries.push(Entry {
                 name: "..".into(),
@@ -282,41 +319,27 @@ impl Browser {
         }
         entries.extend(dirs);
         entries.extend(files);
-        // Pod zawartością katalogu, za linią: dyski (Windows) / zamontowane systemy plików (Linux).
-        let drives = drives();
-        if !drives.is_empty() {
-            entries.push(Entry {
-                name: String::new(),
-                path: PathBuf::new(),
-                is_dir: false,
-                is_up: false,
-                size: 0,
-                mtime: None,
-                drive: None,
-                sep: true,
-            });
-            for (path, name, info) in drives {
-                entries.push(Entry {
-                    name,
-                    path,
-                    is_dir: true,
-                    is_up: false,
-                    size: info.total.unwrap_or(0),
-                    mtime: None,
-                    drive: Some(info),
-                    sep: false,
-                });
-            }
-        }
         self.entries = entries;
 
         let len = self.entries.len();
         let by_name = select.and_then(|n| self.entries.iter().position(|e| e.name == n && e.drive.is_none()));
-        let mut idx = by_name.or(prev.map(|i| i.min(len.saturating_sub(1)))).unwrap_or(0);
+        // Domyślnie pierwsza pozycja katalogu ("..") — nie dysk.
+        let first = self.pinned.min(len.saturating_sub(1));
+        let mut idx = by_name.or(prev.map(|i| i.min(len.saturating_sub(1)))).unwrap_or(first);
         if self.entries.get(idx).is_some_and(|e| e.sep) {
-            idx = idx.saturating_sub(1);
+            idx = first;
         }
         self.state.select(if len > 0 { Some(idx) } else { None });
+    }
+
+    /// Wiersz listy (od góry, z przypiętymi dyskami) → indeks w `entries`; None poza listą.
+    pub fn index_at(&self, row: usize) -> Option<usize> {
+        let i = if row < self.pinned_shown {
+            row
+        } else {
+            self.pinned + self.rest.offset() + (row - self.pinned_shown)
+        };
+        (i < self.entries.len()).then_some(i)
     }
 
     pub fn selected(&self) -> Option<&Entry> {
@@ -351,6 +374,7 @@ impl Browser {
             let prev = self.cwd.file_name().map(|n| n.to_string_lossy().to_string());
             self.cwd = parent;
             self.marked.clear();
+            self.rest = ListState::default();
             self.reload(prev.as_deref());
         }
     }
@@ -405,9 +429,9 @@ impl Browser {
         } else if is_dir {
             self.cwd = path;
             self.marked.clear();
+            self.rest = ListState::default();
             self.state.select(None);
             self.reload(None);
-            self.state.select(if self.entries.is_empty() { None } else { Some(0) });
             None
         } else {
             Some(path)

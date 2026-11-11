@@ -31,7 +31,7 @@ Więcej zrzutów: [galeria](#galeria).
 | Karta NVIDIA | HEVC: GeForce GTX 10xx (Pascal) lub nowsza; AV1: RTX 40xx / 50xx. Sterownik 570 lub nowszy (`nvidia-smi` do monitora obciążenia) |
 | Karta Intel | HEVC: Core 7. gen. (Kaby Lake) lub nowszy; AV1: Arc (A/B), Core Ultra (Meteor Lake) lub nowszy |
 | Sterowniki Intel | Linux: `intel-media-driver` (iHD, VA-API) i runtime oneVPL: `vpl-gpu-rt` (Tiger Lake i nowsze) albo `intel-media-sdk` (starsze); na Debianie `intel-media-va-driver-non-free` i `libmfx-gen1.2`; użytkownik w grupie `render`. Windows: aktualny sterownik grafiki Intel (zawiera runtime oneVPL) |
-| Miejsce na dysku | wolne miejsce w katalogu wyjściowym na pliki tymczasowe (rzędu rozmiaru wyniku) |
+| Miejsce na dysku | na wynik; przy Dolby Vision / HDR10+ także na pliki tymczasowe (rzędu rozmiaru wyniku) |
 
 Wystarczy jedna karta. Gdy w komputerze są obie, domyślnie koduje NVIDIA, a Intela wybiera się jawnie (niżej).
 
@@ -61,7 +61,7 @@ Do kodowania na Intelu doinstaluj `intel-media-driver` i `vpl-gpu-rt`; na NVIDII
 **Windows** — rozpakuj `VideoPipeline-*-windows-x86_64_v3.zip` i uruchom `videopipeline.exe` (dwuklik otwiera okno
 konsoli; najlepiej wygląda w Windows Terminal). Wszystkie pliki muszą zostać w jednym folderze. Pliki nie są podpisane
 cyfrowo, więc SmartScreen może poprosić o potwierdzenie. Pliki przeciągnięte na `videopipeline.exe` są od razu kodowane
-(tryb skryptowy). Pod zawartością katalogu lewy panel pokazuje dyski z etykietami i wolnym miejscem.
+(tryb skryptowy). U góry lewego panelu widać dyski z etykietami i wolnym miejscem.
 `utworz-skrot.cmd` z paczki tworzy skrót „VideoPipeline” na pulpicie i w menu Start (zob. niżej: okno programu).
 
 Sumy kontrolne leżą obok plików (`.sha256`).
@@ -105,9 +105,9 @@ po lewej pliki, po prawej kolejkę kodowania.
 | Ctrl+L | przerysuj ekran (gdy terminal zostawi resztki okna) |
 | Mysz | klik — kursor i zaznaczenie pliku; podwójny klik — zaznaczone + kliknięty plik do kolejki (na katalogu: wejście); prawy klik — MediaInfo; kółko — przewijanie; klik na pasku F1–F10 — klawisz. Zaznaczanie tekstu w terminalu: z wciśniętym Shift |
 
-Pod zawartością katalogu, za linią „Dyski”, lewy panel pokazuje dyski: na Windows litery z etykietami woluminów,
-na Linuksie zamontowane systemy plików (dyski, pendrive'y w `/run/media`, udziały sieciowe) z etykietą; obok rozmiar
-i wolne miejsce. Enter na dysku przechodzi do niego.
+U góry lewego panelu, przypięte i oddzielone linią od plików, są dyski — zawsze widoczne, niezależnie od przewinięcia:
+na Windows litery z etykietami woluminów, na Linuksie zamontowane systemy plików (dyski, pendrive'y w `/run/media`,
+udziały sieciowe, np. SMB z fstab) z etykietą; obok rozmiar i wolne miejsce. Enter na dysku przechodzi do niego.
 
 Długa nazwa zaznaczonego pliku, która nie mieści się w kolumnie, przewija się sama, więc da się ją przeczytać
 przy każdym rozmiarze okna.
@@ -158,6 +158,7 @@ Przy starcie program wykrywa enkodery krótkim kodowaniem testowym (sama obecno�
 | `--intel`, `--engine nvenc\|qsv\|vaapi` | wybór karty (wyżej) |
 | `-q N`, `--hevc-cq N`, `--av1-cq N` | jakość, 1–51, mniej = lepiej (domyślnie HEVC 19, AV1 25) |
 | `--qsv-preset P` | preset Intel QSV: `veryfast` … `veryslow` (domyślnie `slow`); `veryslow` na zintegrowanej grafice bywa kilka razy wolniejszy przy niewielkim zysku jakości |
+| `--container auto\|mkv\|mp4` | kontener wyniku (domyślnie jak źródło); w MP4 Dolby Vision i HDR10+ nie są pełne — do nich MKV |
 | `-pleac3` | polska ścieżka → E-AC-3 stereo 192 kb/s |
 | `-da` | dodatkowo angielskie audio (E-AC-3 5.1) oraz napisy EN i PL |
 | `-d` | łagodne odszumianie (tylko źródła SDR 8-bit; CUDA, vpp_qsv / denoise_vaapi albo CPU) |
@@ -171,9 +172,18 @@ Przy starcie program wykrywa enkodery krótkim kodowaniem testowym (sama obecno�
 dla AV1 przeliczone ×5 na skalę 0–255). Skale enkoderów nie są identyczne, więc ten sam CQ na różnych kartach daje
 podobną, ale nie taką samą jakość i rozmiar.
 
-**Pliki wynikowe** trafiają do `~/Wideo` (zmiana w F7). Kontener wynika ze źródła: `.mp4` → `.mp4`, wszystko inne → `.mkv`.
+**Pliki wynikowe** trafiają do `~/Wideo` (zmiana w F7). Kontener domyślnie wynika ze źródła (`.mp4` → `.mp4`, wszystko
+inne → `.mkv`); w F7 albo `--container` można wymusić MKV lub MP4. Do MP4 audio w kodekach spoza MP4 (np. DTS,
+TrueHD) jest przekodowywane do E-AC-3 640k, napisy tekstowe do mov_text, a obrazkowe (PGS) są pomijane.
 Nazwa zawiera kodek i opcje, np. `film_hevc.mkv`, `film_hevc_qsv_cq22.mkv`, `film_av1_10bit_cq23_da.mkv`, więc wyniki
-z różnymi ustawieniami się nie nadpisują. Przerwane kodowanie wznawia się od ostatniego ukończonego etapu.
+z różnymi ustawieniami się nie nadpisują.
+
+**Bez plików tymczasowych.** Gdy w źródle nie ma Dolby Vision ani HDR10+ (albo ich analiza jest wyłączona: `-pdv`, `-ph`),
+a także zawsze dla AV1, ffmpeg koduje wideo i od razu zapisuje plik wynikowy razem z audio (kopia, a E-AC-3 z `-pleac3`
+/ `-da` w locie) i napisami — bez pośrednich plików `.hevc`/`.eac3` i bez osobnego muksowania, więc dysk dostaje
+o połowę mniej zapisów. Do czasu ukończenia plik ma końcówkę `.part`. Z Dolby Vision / HDR10+ wideo przechodzi przez
+plik tymczasowy, bo metadane trzeba wstrzyknąć (dovi_tool, hdr10plus_tool) przed muksowaniem; przerwane kodowanie
+wznawia się wtedy od ostatniego ukończonego etapu.
 W MP4 Dolby Vision zostaje w strumieniu, ale bez rekordu konfiguracji — część odtwarzaczy pokaże wtedy zwykły HDR10.
 
 ## Galeria

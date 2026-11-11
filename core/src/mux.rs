@@ -7,6 +7,7 @@ use crate::{
 };
 use anyhow::{bail, Result};
 use std::{
+    collections::HashMap,
     fs,
     path::{Path, PathBuf},
     process::Stdio,
@@ -30,6 +31,74 @@ fn encode_audio(input: &Path, idx: u32, bitrate: &str, channels: &str, lang: &st
     .map(|x| x.to_string())
     .collect();
     run_quiet("ffmpeg", &args)
+}
+
+/// Kodeki audio, które MP4 przyjmuje bez przekodowania.
+const MP4_AUDIO: &[&str] = &["aac", "ac3", "eac3", "mp3", "mp2", "opus", "flac", "alac"];
+/// Napisy tekstowe — do MP4 jako mov_text. Obrazkowych (PGS, DVD) MP4 nie przyjmie.
+const TEXT_SUBS: &[&str] = &["subrip", "srt", "ass", "ssa", "mov_text", "webvtt", "text"];
+
+/// Mapowanie i kodeki strumieni źródła (wejście ffmpeg nr `src`): wybrane audio i napisy w postaci
+/// zgodnej z kontenerem. `encode_audio`: polska (-pleac3) i angielska (-da) ścieżka E-AC-3 kodowane
+/// w locie; inaczej dokłada je wołający z plików tymczasowych. Zwraca (argumenty, liczba ścieżek audio).
+pub(crate) fn source_streams(
+    opts: &Opts,
+    a: &Analysis,
+    container: Container,
+    src: usize,
+    encode_audio: bool,
+    info: &HashMap<u32, (String, u32)>,
+) -> (Vec<String>, usize) {
+    let codec = |idx: u32| info.get(&idx).map(|(c, _)| c.clone()).unwrap_or_default();
+    let mut args: Vec<String> = vec![];
+    let mut n = 0usize;
+    for idx in source_audio(opts, a) {
+        args.extend(["-map".into(), format!("{src}:{idx}")]);
+        let c = codec(idx);
+        if container == Container::Mp4 && !c.is_empty() && !MP4_AUDIO.contains(&c.as_str()) {
+            args.extend([format!("-c:a:{n}"), "eac3".into(), format!("-b:a:{n}"), "640k".into()]);
+            if info.get(&idx).is_some_and(|(_, ch)| *ch > 6) {
+                args.extend([format!("-ac:a:{n}"), "6".into()]);
+            }
+            plog!("    MP4: ścieżka audio {idx} ({c}) przekodowana do E-AC-3 640k (MP4 nie przyjmuje {c})");
+        } else {
+            args.extend([format!("-c:a:{n}"), "copy".into()]);
+        }
+        n += 1;
+    }
+    if encode_audio {
+        let mut enc = |idx: u32, bitrate: &str, channels: &str, lang: &str| {
+            args.extend(["-map".into(), format!("{src}:{idx}")]);
+            args.extend([format!("-c:a:{n}"), "eac3".into(), format!("-b:a:{n}"), bitrate.into()]);
+            args.extend([format!("-ac:a:{n}"), channels.into()]);
+            args.extend([format!("-metadata:s:a:{n}"), format!("language={lang}")]);
+            n += 1;
+        };
+        if let Some(idx) = a.pol_audio.filter(|_| opts.pl_eac3) {
+            enc(idx, "192k", "2", "pol");
+        }
+        // Angielskie audio tylko z -da (jak w ścieżce z mkvmerge).
+        if let Some(idx) = a.eng_audio.filter(|_| opts.extra) {
+            enc(idx, "484k", "6", "eng");
+        }
+    }
+    let mut ns = 0usize;
+    for idx in source_subs(opts, a) {
+        let c = codec(idx);
+        let text = c.is_empty() || TEXT_SUBS.contains(&c.as_str());
+        let out_codec = match container {
+            Container::Mp4 if !text => {
+                plog!("    MP4: pominięto napisy {idx} ({c}) — MP4 przyjmuje tylko napisy tekstowe");
+                continue;
+            }
+            Container::Mp4 => "mov_text",
+            Container::Mkv if c == "mov_text" => "srt",
+            Container::Mkv => "copy",
+        };
+        args.extend(["-map".into(), format!("{src}:{idx}"), format!("-c:s:{ns}"), out_codec.into()]);
+        ns += 1;
+    }
+    (args, n)
 }
 
 /// Które strumienie źródła kopiujemy bez zmian (wspólne dla MKV i MP4).
@@ -93,8 +162,8 @@ fn mux_mkv(opts: &Opts, a: &Analysis, p: &Paths, current_video: &Path) -> Result
     Ok(())
 }
 
-/// MP4 (źródło .mp4): składanie przez ffmpeg. mkvmerge nie zapisuje MP4.
-/// Strumienie źródła są kopiowane (źródło MP4 ma już audio i napisy zgodne z MP4).
+/// MP4: składanie przez ffmpeg (mkvmerge nie zapisuje MP4). Audio i napisy źródła trafiają do MP4
+/// w zgodnej postaci (source_streams): kodeki spoza MP4 → E-AC-3, napisy tekstowe → mov_text.
 fn mux_mp4(opts: &Opts, a: &Analysis, p: &Paths, video: &Path, dynamic_hdr: bool) -> Result<()> {
     // Surowy strumień HEVC (po dovi_tool/hdr10plus_tool) nie ma znaczników czasu — podajemy fps ze źródła.
     let raw_hevc = video.extension().and_then(|e| e.to_str()) == Some("hevc");
@@ -108,15 +177,13 @@ fn mux_mp4(opts: &Opts, a: &Analysis, p: &Paths, video: &Path, dynamic_hdr: bool
     }
     args.extend(["-i".into(), s(video), "-i".into(), s(&a.input_file)]);
 
-    let mut maps: Vec<String> = vec!["-map".into(), "0:v:0".into()];
+    let info = probe::stream_codecs(&a.input_file);
+    let (src_args, mut out_audio) = source_streams(opts, a, Container::Mp4, 1, false, &info);
+    let mut maps: Vec<String> = vec!["-map".into(), "0:v:0".into(), "-c:v".into(), "copy".into()];
+    maps.extend(src_args);
     let mut meta: Vec<String> = vec![];
-    let mut out_audio = 0usize;
     let mut next_input = 2usize; // 0 = wideo, 1 = źródło
 
-    for idx in source_audio(opts, a) {
-        maps.extend(["-map".into(), format!("1:{idx}")]);
-        out_audio += 1;
-    }
     // E-AC-3 z plików tymczasowych: surowy strumień nie niesie języka, więc ustawiamy go jawnie.
     let mut temp_audio: Vec<(&PathBuf, &str)> = vec![];
     if opts.pl_eac3 && a.pol_audio.is_some() && p.temp_pol_audio.exists() {
@@ -127,19 +194,15 @@ fn mux_mp4(opts: &Opts, a: &Analysis, p: &Paths, video: &Path, dynamic_hdr: bool
     }
     for (path, lang) in temp_audio {
         args.extend(["-i".into(), s(path)]);
-        maps.extend(["-map".into(), format!("{next_input}:0")]);
+        maps.extend(["-map".into(), format!("{next_input}:0"), format!("-c:a:{out_audio}"), "copy".into()]);
         meta.extend([format!("-metadata:s:a:{out_audio}"), format!("language={lang}")]);
         out_audio += 1;
         next_input += 1;
-    }
-    for idx in source_subs(opts, a) {
-        maps.extend(["-map".into(), format!("1:{idx}")]);
     }
 
     args.extend(maps);
     args.extend(meta);
     args.extend(["-map_chapters".into(), "1".into(), "-map_metadata".into(), "1".into()]);
-    args.extend(["-c".into(), "copy".into()]);
     if opts.codec == Codec::Hevc {
         // hvc1: zgodność z odtwarzaczami (Apple, przeglądarki, KDE).
         args.extend(["-tag:v".into(), "hvc1".into()]);
@@ -162,6 +225,16 @@ fn mux_mp4(opts: &Opts, a: &Analysis, p: &Paths, video: &Path, dynamic_hdr: bool
     Ok(())
 }
 
+/// Pliki tymczasowe i analiza — po gotowym pliku wynikowym nie są już potrzebne.
+fn remove_temps(p: &Paths, analysis_file: &Path) {
+    for f in [
+        &p.temp_video, &p.step1, &p.step2, &p.temp_rpu, &p.temp_hdr10plus,
+        &p.temp_eng_audio, &p.temp_pol_audio, &analysis_file.to_path_buf(),
+    ] {
+        let _ = fs::remove_file(f);
+    }
+}
+
 /// Kopiowanie do source/encoded (tylko z -c) po ukończeniu / przy resume.
 fn finish_copy(opts: &Opts, a: &Analysis, output: &Path, already: bool, panel: &mut Panel) {
     let name = &a.filename;
@@ -169,7 +242,7 @@ fn finish_copy(opts: &Opts, a: &Analysis, output: &Path, already: bool, panel: &
         let note = if already {
             "Plik wynikowy już istnieje — kopiowanie -c wyłączone"
         } else {
-            "Cały pipeline zakończony — kopiowanie -c wyłączone"
+            "Gotowe — kopiowanie -c wyłączone"
         };
         panel.set(name, State::Done, note);
         return;
@@ -199,7 +272,10 @@ pub fn run(opts: &Opts, a: &Analysis, analysis_file: &Path, panel: &mut Panel) -
     }
 
     if p.output.exists() {
-        finish_copy(opts, a, &p.output, true, panel);
+        // Plik gotowy: zakodowany od razu do kontenera w etapie 2 albo z wcześniejszego uruchomienia.
+        let direct = opts.direct_encode(a.has_dovi, a.has_hdr10plus);
+        remove_temps(&p, analysis_file);
+        finish_copy(opts, a, &p.output, !direct, panel);
         return Ok(());
     }
     plog!(" -> [{name}] Składanie pliku wynikowego ({})...", opts.codec.name());
@@ -299,12 +375,7 @@ pub fn run(opts: &Opts, a: &Analysis, analysis_file: &Path, panel: &mut Panel) -
     }
 
     // Pliki tymczasowe usuwamy dopiero po udanym złożeniu pliku.
-    for f in [
-        &p.temp_video, &p.step1, &p.step2, &p.temp_rpu, &p.temp_hdr10plus,
-        &p.temp_eng_audio, &p.temp_pol_audio, &analysis_file.to_path_buf(),
-    ] {
-        let _ = fs::remove_file(f);
-    }
+    remove_temps(&p, analysis_file);
 
     finish_copy(opts, a, &p.output, false, panel);
     Ok(())

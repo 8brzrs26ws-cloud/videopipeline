@@ -176,11 +176,12 @@ pub struct RenameCtx {
     pub input: TextInput,
 }
 
-pub const OPTION_COUNT: usize = 13;
+pub const OPTION_COUNT: usize = 14;
 /// Indeksy wierszy w oknie opcji (F7).
 pub const OPT_HEVC_CQ: usize = 1;
 pub const OPT_AV1_CQ: usize = 2;
 pub const OPT_QSV_PRESET: usize = 3;
+pub const OPT_CONTAINER: usize = 4;
 
 pub struct RunCtx {
     pub status: SharedStatus,
@@ -657,14 +658,20 @@ impl App {
                 self.status_msg.clear();
                 self.focus = panel;
                 let row = (m.row - list.y) as usize;
-                let (offset, len) = match panel {
-                    Focus::Left => (self.browser.state.offset(), self.browser.entries.len()),
-                    Focus::Right => (self.queue.state.offset(), self.queue.items.len()),
+                let idx = match panel {
+                    // Lewy panel: przypięte dyski u góry + przewijana zawartość katalogu.
+                    Focus::Left => match self.browser.index_at(row) {
+                        Some(i) if !self.browser.entries[i].sep => i,
+                        _ => return,
+                    },
+                    Focus::Right => {
+                        let i = self.queue.state.offset() + row;
+                        if i >= self.queue.items.len() {
+                            return;
+                        }
+                        i
+                    }
                 };
-                let idx = offset + row;
-                if idx >= len || (panel == Focus::Left && self.browser.entries[idx].sep) {
-                    return;
-                }
                 match panel {
                     Focus::Left => self.browser.state.select(Some(idx)),
                     Focus::Right => self.queue.state.select(Some(idx)),
@@ -904,6 +911,7 @@ impl App {
             OPT_HEVC_CQ => self.opts.hevc_cq = bump(self.opts.hevc_cq),
             OPT_AV1_CQ => self.opts.av1_cq = bump(self.opts.av1_cq),
             OPT_QSV_PRESET => self.cycle_preset(d.signum()),
+            OPT_CONTAINER => self.cycle_container(d.signum()),
             0 => self.cycle_codec(if d < 0 { -1 } else { 1 }),
             _ => self.toggle_option(),
         }
@@ -930,6 +938,13 @@ impl App {
         self.opts.codec = c;
     }
 
+    /// Kontener wyniku: jak źródło → MKV → MP4 (z zawijaniem).
+    fn cycle_container(&mut self, d: i32) {
+        let all = ContainerChoice::ALL;
+        let i = all.iter().position(|c| *c == self.opts.container).unwrap_or(0) as i32;
+        self.opts.container = all[(i + if d < 0 { -1 } else { 1 }).rem_euclid(all.len() as i32) as usize];
+    }
+
     /// Preset QSV: ← szybciej, → wolniej i lepiej (bez zawijania).
     fn cycle_preset(&mut self, d: i32) {
         let i = QSV_PRESETS.iter().position(|p| *p == self.opts.qsv_preset).unwrap_or(4) as i32;
@@ -946,15 +961,16 @@ impl App {
                 let i = QSV_PRESETS.iter().position(|p| *p == self.opts.qsv_preset).unwrap_or(4);
                 self.opts.qsv_preset = QSV_PRESETS[(i + 1) % QSV_PRESETS.len()];
             }
-            4 => self.opts.pl_eac3 = !self.opts.pl_eac3,
-            5 => self.opts.extra = !self.opts.extra,
-            6 => self.opts.denoise = !self.opts.denoise,
-            7 => self.opts.no_crop = !self.opts.no_crop,
-            8 => self.opts.no_dv = !self.opts.no_dv,
-            9 => self.opts.no_hdr10plus = !self.opts.no_hdr10plus,
-            10 => self.opts.copy = !self.opts.copy,
-            11 => self.opts.shutdown = !self.opts.shutdown,
-            12 => self.opt_edit = Some(self.opts.output_dir.to_string_lossy().to_string()),
+            OPT_CONTAINER => self.cycle_container(1),
+            5 => self.opts.pl_eac3 = !self.opts.pl_eac3,
+            6 => self.opts.extra = !self.opts.extra,
+            7 => self.opts.denoise = !self.opts.denoise,
+            8 => self.opts.no_crop = !self.opts.no_crop,
+            9 => self.opts.no_dv = !self.opts.no_dv,
+            10 => self.opts.no_hdr10plus = !self.opts.no_hdr10plus,
+            11 => self.opts.copy = !self.opts.copy,
+            12 => self.opts.shutdown = !self.opts.shutdown,
+            13 => self.opt_edit = Some(self.opts.output_dir.to_string_lossy().to_string()),
             _ => {}
         }
     }

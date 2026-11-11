@@ -13,6 +13,8 @@ struct ProbeJson {
 struct StreamJson {
     index: u32,
     codec_type: Option<String>,
+    codec_name: Option<String>,
+    channels: Option<u32>,
     pix_fmt: Option<String>,
     bits_per_raw_sample: Option<String>,
     color_range: Option<String>,
@@ -132,6 +134,24 @@ pub fn probe(input: &Path) -> Result<Media> {
             .and_then(|d| d.parse::<f64>().ok()),
         color: video.map(color_from).unwrap_or_default(),
     })
+}
+
+/// Kodek i liczba kanałów każdego strumienia (indeks ffprobe → (kodek, kanały; 0 dla nie-audio)).
+/// Do wyboru: kopiować strumień do kontenera czy przekodować (MP4 nie przyjmie np. DTS ani napisów PGS).
+pub fn stream_codecs(input: &Path) -> HashMap<u32, (String, u32)> {
+    let Ok(out) = crate::proc::command("ffprobe")
+        .args(["-v", "error", "-show_streams", "-of", "json"])
+        .arg(input)
+        .stdin(std::process::Stdio::null())
+        .output()
+    else {
+        return HashMap::new();
+    };
+    let j: ProbeJson = serde_json::from_slice(&out.stdout).unwrap_or_default();
+    j.streams
+        .iter()
+        .map(|s| (s.index, (s.codec_name.clone().unwrap_or_default(), s.channels.unwrap_or(0))))
+        .collect()
 }
 
 fn probe_value(path: &Path, args: &[&str]) -> Option<String> {

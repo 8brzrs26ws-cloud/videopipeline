@@ -174,12 +174,14 @@ impl Monitor {
 impl Drop for Monitor {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::SeqCst);
+        // Windows: taskkill bez /F nie zamyka programu konsolowego bez okna (nvidia-smi działałby
+        // dalej, a join poniżej zablokowałby interfejs) — tam zawsze bezwarunkowo.
         if let Some(p) = self.pid.lock().ok().and_then(|g| *g) {
-            crate::platform::kill_pid(p, false);
+            crate::platform::kill_pid(p, cfg!(windows));
         }
-        if let Some(t) = self.thread.take() {
-            let _ = t.join();
-        }
+        // Bez czekania na wątek: kończy się sam po zamknięciu nvidia-smi, a interfejs nie może
+        // zawisnąć, gdyby proces nie dał się zatrzymać.
+        drop(self.thread.take());
     }
 }
 

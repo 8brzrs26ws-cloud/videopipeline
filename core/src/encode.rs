@@ -16,7 +16,10 @@ use std::{
 struct Running {
     child: Child,
     name: String,
+    /// Plik zapisywany przez ffmpeg: tymczasowe wideo albo <wynik>.part (tryb bezpośredni).
     output: PathBuf,
+    /// Tryb bezpośredni: docelowa nazwa pliku wynikowego (po sukcesie .part → wynik).
+    final_out: Option<PathBuf>,
     log: PathBuf,
     pf: PathBuf,
 }
@@ -29,11 +32,60 @@ fn sanitize(s: &str) -> String {
     s.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect()
 }
 
+/// Wyjście ffmpeg: mapowanie strumieni (przed opcjami kodera) i końcówka z plikiem.
+struct OutSpec {
+    streams: Vec<String>,
+    tail: Vec<String>,
+}
+
+/// Opcje kodera wideo tylko dla strumienia wideo (`-preset` → `-preset:v`) — przy kodowaniu wprost
+/// do kontenera w tym samym poleceniu są też strumienie audio (kopia / E-AC-3).
+fn scope_v(args: Vec<String>) -> Vec<String> {
+    let mut out = Vec::with_capacity(args.len());
+    let mut opt = true; // na przemian: opcja, wartość
+    for a in args {
+        if opt && a.starts_with('-') && !a.contains(':') {
+            out.push(format!("{a}:v"));
+        } else {
+            out.push(a);
+        }
+        opt = !opt;
+    }
+    out
+}
+
+/// Tryb z plikiem tymczasowym: samo wideo do surowego .hevc / .mkv (AV1), dalej DV/HDR10+ i mux.
+fn temp_out(path: &Path) -> OutSpec {
+    OutSpec { streams: sv(&["-an", "-sn", "-map", "0:v:0"]), tail: vec![path.to_string_lossy().into()] }
+}
+
+/// Tryb bezpośredni: wideo + audio (kopia lub E-AC-3 w locie) + napisy od razu w pliku wynikowym.
+fn direct_out(opts: &Opts, a: &Analysis, p: &Paths, part: &Path) -> OutSpec {
+    let info = probe::stream_codecs(&a.input_file);
+    let mut streams = sv(&["-map", "0:v:0"]);
+    let (src, _) = crate::mux::source_streams(opts, a, p.container, 0, true, &info);
+    streams.extend(src);
+    let mut tail = sv(&["-map_metadata", "0", "-map_chapters", "0"]);
+    match p.container {
+        Container::Mp4 => {
+            tail.extend(sv(&["-movflags", "+faststart"]));
+            if opts.codec == Codec::Hevc {
+                tail.extend(sv(&["-tag:v", "hvc1"])); // zgodność z odtwarzaczami (Apple, przeglądarki)
+            }
+            tail.extend(sv(&["-f", "mp4"]));
+        }
+        Container::Mkv => tail.extend(sv(&["-f", "matroska"])),
+    }
+    tail.extend(sv(&["-y"]));
+    tail.push(part.to_string_lossy().into());
+    OutSpec { streams, tail }
+}
+
 fn build_args_nvenc(
     opts: &Opts,
     rt: &Runtime,
     a: &Analysis,
-    out: &Path,
+    out: &OutSpec,
     pf: &Path,
 ) -> (Vec<String>, String) {
     let c = &a.color;
@@ -115,10 +167,10 @@ fn build_args_nvenc(
     v.push("-i".into());
     v.push(a.input_file.to_string_lossy().into());
     v.extend(filt);
-    v.extend(sv(&["-an", "-sn", "-map", "0:v:0"]));
-    v.extend(enc);
-    v.extend(fmt);
-    v.push(out.to_string_lossy().into());
+    v.extend(out.streams.iter().cloned());
+    v.extend(scope_v(enc));
+    v.extend(scope_v(fmt));
+    v.extend(out.tail.iter().cloned());
     (v, note.to_string())
 }
 
@@ -152,7 +204,7 @@ fn build_args_intel(
     rt: &Runtime,
     a: &Analysis,
     src_codec: Option<&str>,
-    out: &Path,
+    out: &OutSpec,
     pf: &Path,
 ) -> (Vec<String>, String, String) {
     let c = &a.color;
@@ -287,15 +339,18 @@ fn build_args_intel(
         }
     }
 
-    v.extend(sv(&["-an", "-sn", "-map", "0:v:0"]));
-    v.extend(enc);
-    if c.is_sdr_8bit {
-        v.extend(sv(&["-color_primaries", &c.sdr_primaries, "-color_trc", &c.sdr_trc]));
-        v.extend(sv(&["-colorspace", &c.sdr_space, "-color_range", &c.sdr_range]));
+    v.extend(out.streams.iter().cloned());
+    v.extend(scope_v(enc));
+    let color = if c.is_sdr_8bit {
+        sv(&[
+            "-color_primaries", &c.sdr_primaries, "-color_trc", &c.sdr_trc,
+            "-colorspace", &c.sdr_space, "-color_range", &c.sdr_range,
+        ])
     } else {
-        v.extend(sv(&["-color_primaries", "bt2020", "-color_trc", "smpte2084", "-colorspace", "bt2020nc"]));
-    }
-    v.push(out.to_string_lossy().into());
+        sv(&["-color_primaries", "bt2020", "-color_trc", "smpte2084", "-colorspace", "bt2020nc"])
+    };
+    v.extend(scope_v(color));
+    v.extend(out.tail.iter().cloned());
     (v, notes.join(" · "), decoder)
 }
 
@@ -344,15 +399,28 @@ fn start(
     let dur_us = probe::container_duration(&a.input_file).map(|d| d * 1e6);
     panel.set_progress(&a.filename, pf.clone(), dur_us);
 
+    let direct = opts.direct_encode(a.has_dovi, a.has_hdr10plus);
+    let part = PathBuf::from(format!("{}.part", p.output.display()));
+    let (write_to, out) = if direct {
+        let _ = fs::remove_file(&part);
+        (part.clone(), direct_out(opts, a, &p, &part))
+    } else {
+        (p.temp_video.clone(), temp_out(&p.temp_video))
+    };
     let (args, note, decoder) = if opts.engine == Engine::Nvenc {
-        let (args, note) = build_args_nvenc(opts, rt, a, &p.temp_video, &pf);
+        let (args, note) = build_args_nvenc(opts, rt, a, &out, &pf);
         (args, note, "CUDA/NVDEC".to_string())
     } else {
         let src = probe::video_codec(&a.input_file);
-        build_args_intel(opts, rt, a, src.as_deref(), &p.temp_video, &pf)
+        build_args_intel(opts, rt, a, src.as_deref(), &out, &pf)
     };
     let eng = opts.engine.label();
-    panel.set(&a.filename, State::Nvenc, format!("{eng} {slot}/2 — {note} — dekoder: {decoder}"));
+    let mode = if direct {
+        format!(" — od razu do {}", p.container.ext().to_uppercase())
+    } else {
+        String::new()
+    };
+    panel.set(&a.filename, State::Nvenc, format!("{eng} {slot}/2 — {note} — dekoder: {decoder}{mode}"));
 
     let logf = File::create(&log)?;
     let child = crate::proc::command("ffmpeg")
@@ -365,7 +433,8 @@ fn start(
     Ok(Running {
         child,
         name: a.filename.clone(),
-        output: p.temp_video,
+        output: write_to,
+        final_out: direct.then(|| p.output.clone()),
         log,
         pf,
     })
@@ -381,8 +450,19 @@ fn finish(opts: &Opts, r: Running, status: ExitStatus, panel: &Panel) {
         return;
     }
     if status.success() && result_valid(opts, &r.output, &r.pf) {
-        panel.set(&r.name, State::NvencDone, format!("{} zakończony i zweryfikowany", opts.engine.label()));
-        plog!(" -> ffmpeg [{}]: ZAKOŃCZONY + PLIK OK", r.name);
+        if let Some(fin) = &r.final_out {
+            // Tryb bezpośredni: gotowy plik wynikowy dopiero po pełnym zapisie (.part → nazwa docelowa).
+            if let Err(e) = fs::rename(&r.output, fin) {
+                panel.set(&r.name, State::Error, format!("nie można zapisać {}: {e}", fin.display()));
+                plog!(" -> ffmpeg [{}]: BŁĄD zapisu pliku wynikowego: {e}", r.name);
+                return;
+            }
+            panel.set(&r.name, State::NvencDone, "Zakodowano od razu do pliku wynikowego");
+            plog!(" -> ffmpeg [{}]: ZAKOŃCZONY + PLIK OK (bez plików tymczasowych)", r.name);
+        } else {
+            panel.set(&r.name, State::NvencDone, format!("{} zakończony i zweryfikowany", opts.engine.label()));
+            plog!(" -> ffmpeg [{}]: ZAKOŃCZONY + PLIK OK", r.name);
+        }
     } else {
         panel.set(
             &r.name,
@@ -447,7 +527,7 @@ pub fn run_stage(opts: &Opts, rt: &Runtime, files: &[Analysis], panel: &Panel) {
             panel.set(&a.filename, State::Done, "Plik wynikowy już istnieje");
             continue;
         }
-        if p.temp_video.exists() {
+        if p.temp_video.exists() && !opts.direct_encode(a.has_dovi, a.has_hdr10plus) {
             if existing_temp_valid(opts, &p.temp_video, &a.input_file) {
                 panel.set(
                     &a.filename,

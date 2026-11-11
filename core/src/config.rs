@@ -110,6 +110,43 @@ impl Container {
     }
 }
 
+/// Wybór kontenera w opcjach: jak źródło (MP4 → MP4, reszta → MKV) albo zawsze MKV / MP4.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ContainerChoice {
+    Auto,
+    Mkv,
+    Mp4,
+}
+
+impl ContainerChoice {
+    pub const ALL: [ContainerChoice; 3] = [ContainerChoice::Auto, ContainerChoice::Mkv, ContainerChoice::Mp4];
+
+    pub fn resolve(self, input: &Path) -> Container {
+        match self {
+            ContainerChoice::Auto => Container::from_input(input),
+            ContainerChoice::Mkv => Container::Mkv,
+            ContainerChoice::Mp4 => Container::Mp4,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ContainerChoice::Auto => "jak źródło",
+            ContainerChoice::Mkv => "MKV",
+            ContainerChoice::Mp4 => "MP4",
+        }
+    }
+
+    pub fn from_name(s: &str) -> Option<ContainerChoice> {
+        match s.to_ascii_lowercase().as_str() {
+            "auto" => Some(ContainerChoice::Auto),
+            "mkv" | "matroska" => Some(ContainerChoice::Mkv),
+            "mp4" => Some(ContainerChoice::Mp4),
+            _ => None,
+        }
+    }
+}
+
 /// Domyślne wartości jakości (mniej = lepsza jakość i większy plik). Ta sama liczba trafia do
 /// NVENC (-cq), QSV (ICQ -global_quality) i VAAPI (CQP -qp; AV1 w skali 0–255, przeliczane ×5).
 /// Uwaga: w skrypcie fish nazwy AV1 mówiły "cq23", ale faktyczny parametr to 25.
@@ -155,6 +192,8 @@ pub struct Opts {
     pub no_hdr10plus: bool,
     pub shutdown: bool,
     pub output_dir: PathBuf,
+    /// Kontener pliku wynikowego (auto = jak źródło).
+    pub container: ContainerChoice,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -220,9 +259,16 @@ impl Opts {
     }
 
     /// Ścieżki dla pliku wejściowego (nazwa i kontener wyniku wynikają z `input`).
+    /// Wideo kodowane od razu do pliku wynikowego (bez plików tymczasowych .hevc i muksowania):
+    /// gdy nie ma czego wstrzykiwać — brak Dolby Vision i HDR10+ albo ich analiza pominięta, oraz AV1
+    /// (tam DV/HDR10+ i tak nie są przenoszone).
+    pub fn direct_encode(&self, has_dovi: bool, has_hdr10plus: bool) -> bool {
+        self.codec == Codec::Av1 || !((has_dovi && !self.no_dv) || (has_hdr10plus && !self.no_hdr10plus))
+    }
+
     pub fn paths_for(&self, input: &Path) -> Paths {
         let stem = input.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
-        self.paths(&stem, Container::from_input(input))
+        self.paths(&stem, self.container.resolve(input))
     }
 
     fn paths(&self, stem: &str, container: Container) -> Paths {

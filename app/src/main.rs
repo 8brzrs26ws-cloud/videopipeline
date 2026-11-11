@@ -49,6 +49,10 @@ struct Cli {
     /// Preset QSV: veryfast, faster, fast, medium, slow, slower, veryslow (domyślnie slow)
     #[arg(long = "qsv-preset", value_parser = QSV_PRESETS)]
     qsv_preset: Option<String>,
+    /// Kontener wyniku: auto (jak źródło: MP4 → MP4, reszta → MKV), mkv, mp4.
+    /// MP4: bez konfiguracji Dolby Vision i z ograniczeniami HDR10+ — do DV/HDR10+ wybierz MKV
+    #[arg(long, value_parser = ["auto", "mkv", "mp4"])]
+    container: Option<String>,
     /// Pokaż wykryte enkodery GPU i zakończ
     #[arg(long)]
     detect: bool,
@@ -283,6 +287,7 @@ fn real_main() -> Result<i32> {
         no_hdr10plus: cli.no_hdr10plus,
         shutdown: cli.shutdown,
         output_dir: platform::default_output_dir(),
+        container: cli.container.as_deref().and_then(ContainerChoice::from_name).unwrap_or(ContainerChoice::Auto),
     };
 
     // Tryb skryptowy: żadnego ratatui, tylko zwykły tekst — mniej RAM-u.
