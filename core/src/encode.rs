@@ -81,6 +81,30 @@ fn direct_out(opts: &Opts, a: &Analysis, p: &Paths, part: &Path) -> OutSpec {
     OutSpec { streams, tail }
 }
 
+/// Mapowanie tonów HDR (PQ/HLG, BT.2020) → SDR BT.709 8-bit dla AVC. Krzywa Hable bez desaturacji.
+/// CPU: zscale (libzimg) liniowo → tonemap → BT.709.
+pub(crate) const TONEMAP_CPU: &str = "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,\
+tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p";
+/// GPU przez OpenCL (NVIDIA / Intel): klatki z pamięci → karta → z powrotem (koder NVENC bierze z pamięci).
+pub(crate) const TONEMAP_OPENCL: &str = "format=p010le,hwupload,tonemap_opencl=tonemap=hable:desat=0:\
+t=bt709:m=bt709:p=bt709:r=tv:format=nv12,hwdownload,format=nv12";
+/// Intel QSV: opcje vpp_qsv (sprzętowe mapowanie tonów z metadanych HDR źródła).
+pub(crate) const TONEMAP_QSV: &str = "tonemap=1:out_color_matrix=bt709:out_color_primaries=bt709:out_color_transfer=bt709";
+/// Intel VAAPI: filtr po hwupload / dekodowaniu VAAPI.
+pub(crate) const TONEMAP_VAAPI: &str = "tonemap_vaapi=format=nv12:t=bt709:m=bt709:p=bt709";
+
+/// Znaczniki koloru wyniku SDR: jak źródło, a po mapowaniu tonów — BT.709.
+fn sdr_tags(c: &crate::probe::ColorProfile, tonemapped: bool) -> Vec<String> {
+    if tonemapped {
+        sv(&["-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-color_range", "tv"])
+    } else {
+        sv(&[
+            "-color_primaries", &c.sdr_primaries, "-color_trc", &c.sdr_trc,
+            "-colorspace", &c.sdr_space, "-color_range", &c.sdr_range,
+        ])
+    }
+}
+
 fn build_args_nvenc(
     opts: &Opts,
     rt: &Runtime,
@@ -102,9 +126,10 @@ fn build_args_nvenc(
             Codec::Avc => fmt.extend(sv(&["-profile:v", "high"])),
             Codec::Av1 => {}
         }
+        // AVC ze źródła HDR: mapowanie tonów do SDR BT.709 (OpenCL na karcie albo CPU).
+        let tonemap = avc && c.is_hdr();
         fmt.extend(sv(&["-pix_fmt", "yuv420p"]));
-        fmt.extend(sv(&["-color_primaries", &c.sdr_primaries, "-color_trc", &c.sdr_trc]));
-        fmt.extend(sv(&["-colorspace", &c.sdr_space, "-color_range", &c.sdr_range]));
+        fmt.extend(sdr_tags(c, tonemap));
 
         if opts.denoise && c.is_sdr_8bit && rt.denoise != Denoise::Off {
             let mut chain: Vec<String> = vec![];
@@ -120,6 +145,17 @@ fn build_args_nvenc(
             } else {
                 chain.push(DENOISE_CPU_FILTER.into());
                 note = "SDR 8-bit + CPU denoise";
+            }
+            filt = vec!["-vf".into(), chain.join(",")];
+        } else if tonemap {
+            let mut chain: Vec<String> = a.crop.iter().cloned().collect();
+            if rt.tonemap == Tonemap::OpenCl {
+                hw = sv(&["-init_hw_device", "opencl=ocl", "-filter_hw_device", "ocl"]);
+                chain.push(TONEMAP_OPENCL.into());
+                note = "HDR -> SDR AVC 8-bit (tone mapping OpenCL)";
+            } else {
+                chain.push(TONEMAP_CPU.into());
+                note = "HDR -> SDR AVC 8-bit (tone mapping CPU)";
             }
             filt = vec!["-vf".into(), chain.join(",")];
         } else {
@@ -225,6 +261,9 @@ fn build_args_intel(
     let ten_bit = (!c.is_sdr_8bit || opts.codec == Codec::Av1) && opts.codec != Codec::Avc;
     let crop = a.crop.as_deref().and_then(parse_crop);
     let denoise = opts.denoise && c.is_sdr_8bit && rt.denoise != Denoise::Off;
+    // AVC ze źródła HDR: mapowanie tonów (sprzętowe Intel albo CPU — wtedy klatki przez pamięć).
+    let tonemap = opts.codec == Codec::Avc && c.is_hdr();
+    let cpu_tonemap = tonemap && !matches!(rt.tonemap, Tonemap::Qsv | Tonemap::Vaapi);
     let cq = opts.cq() as u32;
 
     let mut v = sv(&["-hide_banner", "-nostats", "-progress"]);
@@ -232,6 +271,7 @@ fn build_args_intel(
 
     let mut notes: Vec<String> = vec![match (c.is_sdr_8bit, opts.codec) {
         (true, _) => "SDR 8-bit".into(),
+        (false, Codec::Avc) if tonemap => format!("HDR → SDR AVC 8-bit (tone mapping {})", if cpu_tonemap { "CPU" } else { "GPU Intel" }),
         (false, Codec::Avc) => "SDR 10-bit → AVC 8-bit".into(),
         (false, _) => "HDR 10-bit".into(),
     }];
@@ -250,8 +290,10 @@ fn build_args_intel(
             if !sysmem {
                 v.extend(sv(&["-filter_hw_device", "qs"]));
             }
+            // Filtry na CPU (Windows "sysmem" albo mapowanie tonów na CPU): klatki z dekodera do pamięci.
+            let cpu_filters = sysmem || cpu_tonemap;
             match qsv_decoder(rt, src_codec) {
-                Some(d) if sysmem => {
+                Some(d) if cpu_filters => {
                     v.extend(sv(&["-c:v", &d]));
                     decoder = format!("QSV ({d}, przez pamięć)");
                 }
@@ -265,10 +307,13 @@ fn build_args_intel(
             v.push("-i".into());
             v.push(a.input_file.to_string_lossy().into());
 
-            if sysmem {
+            if cpu_filters {
                 let mut chain: Vec<String> = vec![];
                 if let Some(cr) = &a.crop {
                     chain.push(cr.clone());
+                }
+                if cpu_tonemap {
+                    chain.push(TONEMAP_CPU.into());
                 }
                 if denoise {
                     chain.push(DENOISE_CPU_FILTER.into());
@@ -285,6 +330,9 @@ fn build_args_intel(
                 if denoise && rt.denoise == Denoise::Intel {
                     vpp.push(format!("denoise={DENOISE_QSV_LEVEL}"));
                     notes.push("denoise vpp_qsv".into());
+                }
+                if tonemap {
+                    vpp.push(TONEMAP_QSV.into());
                 }
                 vpp.push(format!("format={}", if ten_bit { "p010" } else { "nv12" }));
                 v.extend(sv(&["-vf", &format!("vpp_qsv={}", vpp.join(":"))]));
@@ -311,7 +359,7 @@ fn build_args_intel(
             // ale bez -hwaccel_output_format (ffmpeg sam pobiera klatki), potem hwupload.
             let sw_fmt = if ten_bit { "p010le" } else { "nv12" };
             let cpu_denoise = denoise && rt.denoise == Denoise::Cpu;
-            let sysmem = crop.is_some() || cpu_denoise;
+            let sysmem = crop.is_some() || cpu_denoise || cpu_tonemap;
             v.extend(sv(&["-init_hw_device", &format!("vaapi=va:{dev}"), "-filter_hw_device", "va"]));
             v.extend(sv(&["-hwaccel", "vaapi", "-hwaccel_device", "va"]));
             if !sysmem {
@@ -330,13 +378,25 @@ fn build_args_intel(
                     chain.push(DENOISE_CPU_FILTER.into());
                     notes.push("denoise CPU".into());
                 }
-                chain.push(format!("format={sw_fmt}"));
+                if cpu_tonemap {
+                    chain.push(TONEMAP_CPU.into());
+                }
+                // Po sprzętowym mapowaniu tonów klatki są jeszcze 10-bit — tonemap_vaapi zamieni je na nv12.
+                let up_fmt = if tonemap && !cpu_tonemap { "p010le" } else { sw_fmt };
+                chain.push(format!("format={up_fmt}"));
                 chain.push("hwupload".into());
+                if tonemap && !cpu_tonemap {
+                    chain.push(TONEMAP_VAAPI.into());
+                }
             } else {
                 // Klatki z dekodera VAAPI przechodzą bez kopiowania; po dekodowaniu programowym — hwupload.
                 chain.push("format=nv12|p010le|vaapi".into());
                 chain.push("hwupload".into());
-                chain.push(format!("scale_vaapi=format={}", if ten_bit { "p010" } else { "nv12" }));
+                if tonemap {
+                    chain.push(TONEMAP_VAAPI.into());
+                } else {
+                    chain.push(format!("scale_vaapi=format={}", if ten_bit { "p010" } else { "nv12" }));
+                }
             }
             if denoise && rt.denoise == Denoise::Intel {
                 chain.push(format!("denoise_vaapi=denoise={DENOISE_VAAPI_LEVEL}"));
@@ -365,10 +425,7 @@ fn build_args_intel(
     v.extend(out.streams.iter().cloned());
     v.extend(scope_v(enc));
     let color = if c.is_sdr_8bit || opts.codec == Codec::Avc {
-        sv(&[
-            "-color_primaries", &c.sdr_primaries, "-color_trc", &c.sdr_trc,
-            "-colorspace", &c.sdr_space, "-color_range", &c.sdr_range,
-        ])
+        sdr_tags(c, tonemap)
     } else {
         sv(&["-color_primaries", "bt2020", "-color_trc", "smpte2084", "-colorspace", "bt2020nc"])
     };
@@ -422,6 +479,12 @@ fn start(
     let dur_us = probe::container_duration(&a.input_file).map(|d| d * 1e6);
     panel.set_progress(&a.filename, pf.clone(), dur_us);
 
+    if opts.codec == Codec::Avc && a.color.is_hdr() && rt.tonemap == Tonemap::None {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "źródło HDR, a ffmpeg nie ma filtrów mapowania tonów (zscale/tonemap) — AVC niemożliwe; wybierz HEVC albo AV1",
+        ));
+    }
     let direct = opts.direct_encode(a.has_dovi, a.has_hdr10plus);
     let part = PathBuf::from(format!("{}.part", p.output.display()));
     let (write_to, out) = if direct {
@@ -585,6 +648,10 @@ pub fn run_stage(opts: &Opts, rt: &Runtime, files: &[Analysis], panel: &Panel) {
             Ok(r) => {
                 plog!(" -> [{}] PID {} — start", a.filename, r.child.id());
                 running.push(r);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Unsupported => {
+                plog!(" -> [{}] POMINIĘTO: {e}", a.filename);
+                panel.set(&a.filename, State::Error, e.to_string());
             }
             Err(e) => {
                 panel.set(&a.filename, State::Error, format!("nie można uruchomić ffmpeg: {e}"));

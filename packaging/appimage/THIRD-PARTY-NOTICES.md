@@ -7,6 +7,8 @@
 | nv-codec-headers (statycznie, tylko nagłówki) | MIT | https://github.com/FFmpeg/nv-codec-headers |
 | libva, libdrm (Linux; dynamicznie — kopie w AppImage używane tylko, gdy brak ich w systemie) | MIT | https://github.com/intel/libva |
 | libvpl / oneVPL dispatcher (Linux: dynamicznie, Windows: statycznie w ffmpeg.exe) | MIT | https://github.com/intel/libvpl |
+| zimg (filtr zscale w ffmpeg — mapowanie tonów HDR → SDR; Linux: biblioteka z Debiana, Windows: statycznie) | WTFPL | https://github.com/sekrit-twc/zimg |
+| OpenCL ICD Loader (tonemap_opencl w ffmpeg; Linux: ocl-icd z Debiana, Windows: ładowarka Khronos statycznie) | Apache-2.0 / BSD-2-Clause | https://github.com/KhronosGroup/OpenCL-ICD-Loader |
 | dav1d (statycznie w ffmpeg) | BSD-2-Clause | https://code.videolan.org/videolan/dav1d |
 | MKVToolNix (mkvmerge) — Linux: z bibliotekami z dystrybucji Debian; Windows: oficjalna wersja przenośna | GPL-2.0 | https://mkvtoolnix.download/source.html |
 | MediaInfo (CLI; Linux: z bibliotekami z dystrybucji Debian, Windows: oficjalne CLI MediaArea) | BSD-2-Clause | https://mediaarea.net/MediaInfo |

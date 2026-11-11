@@ -126,6 +126,7 @@ pub fn run(opts: &Opts) -> Result<Runtime> {
         progress_dir,
         intel_dev: None,
         qsv_decoders: vec![],
+        tonemap: Tonemap::None,
     };
 
     plog!(
@@ -204,5 +205,54 @@ pub fn run(opts: &Opts) -> Result<Runtime> {
             }
         }
     }
+    if opts.codec == Codec::Avc {
+        rt.tonemap = detect_tonemap(opts, &rt);
+        match rt.tonemap {
+            Tonemap::None => plog!("UWAGA: ffmpeg nie ma filtrów mapowania tonów — pliki HDR w AVC zostaną pominięte."),
+            t => plog!("AVC ze źródeł HDR: mapowanie tonów HDR → SDR BT.709 — {}.", t.label()),
+        }
+    }
     Ok(rt)
+}
+
+/// Testowe źródło HDR10 (PQ, BT.2020, 10-bit) do sprawdzenia filtrów mapowania tonów.
+const HDR_TEST_SRC: &str =
+    "color=c=gray:s=320x240:r=25:d=0.2,format=yuv420p10le,setparams=color_primaries=bt2020:color_trc=smpte2084:colorspace=bt2020nc";
+
+fn ffmpeg_ok(args: &[String]) -> bool {
+    crate::proc::command("ffmpeg")
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+/// Najlepsze działające mapowanie tonów dla wybranej karty: najpierw GPU, zapasowo CPU.
+fn detect_tonemap(opts: &Opts, rt: &Runtime) -> Tonemap {
+    let sv = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<String>>();
+    let run = |pre: Vec<String>, vf: &str| {
+        let mut a = sv(&["-hide_banner", "-nostdin", "-loglevel", "error"]);
+        a.extend(pre);
+        a.extend(sv(&["-f", "lavfi", "-i", HDR_TEST_SRC, "-vf", vf, "-frames:v", "3", "-f", "null", "-"]));
+        ffmpeg_ok(&a)
+    };
+    let dev = rt.intel_dev.as_ref().map(|d| d.to_string_lossy().to_string());
+    let gpu = match (opts.engine, dev) {
+        (Engine::Nvenc, _) => run(sv(&["-init_hw_device", "opencl=ocl", "-filter_hw_device", "ocl"]), crate::encode::TONEMAP_OPENCL)
+            .then_some(Tonemap::OpenCl),
+        (Engine::Qsv, Some(d)) if !crate::hw::qsv_is_sysmem(&d) => {
+            let mut pre = crate::hw::qsv_init_args(&d);
+            pre.extend(sv(&["-filter_hw_device", "qs"]));
+            let vf = format!("format=p010le,hwupload=extra_hw_frames=16,vpp_qsv={}:format=nv12", crate::encode::TONEMAP_QSV);
+            run(pre, &vf).then_some(Tonemap::Qsv)
+        }
+        (Engine::Vaapi, Some(d)) => {
+            let pre = sv(&["-init_hw_device", &format!("vaapi=va:{d}"), "-filter_hw_device", "va"]);
+            run(pre, &format!("format=p010le,hwupload,{}", crate::encode::TONEMAP_VAAPI)).then_some(Tonemap::Vaapi)
+        }
+        _ => None,
+    };
+    gpu.or_else(|| run(vec![], crate::encode::TONEMAP_CPU).then_some(Tonemap::Cpu)).unwrap_or(Tonemap::None)
 }

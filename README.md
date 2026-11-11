@@ -175,7 +175,7 @@ Przy starcie program wykrywa enkodery krótkim kodowaniem testowym (sama obecno�
 | Flaga | Działanie |
 |---|---|
 | `-av1` | AV1 zamiast HEVC (zawsze 10-bit; bez Dolby Vision i HDR10+) |
-| `-avc`, `--avc` | AVC (H.264) zamiast HEVC: profil High 8-bit, tylko źródła SDR (pliki HDR są pomijane z komunikatem — HDR bez mapowania tonów w 8 bitach wyglądałby źle); 10-bit SDR jest przeliczane do 8 bitów |
+| `-avc`, `--avc` | AVC (H.264) zamiast HEVC: profil High 8-bit SDR. Źródła HDR (HDR10, HLG, warstwa bazowa DV 8.1) są mapowane do SDR BT.709 (tone mapping, niżej); 10-bit SDR jest przeliczane do 8 bitów |
 | `--intel`, `--engine nvenc\|qsv\|vaapi` | wybór karty (wyżej) |
 | `-q N`, `--hevc-cq N`, `--av1-cq N`, `--avc-cq N` | jakość, 1–51, mniej = lepiej (domyślnie HEVC 19, AV1 25, AVC 18 — AVC potrzebuje niższego CQ do podobnej jakości) |
 | `--qsv-preset P` | preset Intel QSV: `veryfast` … `veryslow` (domyślnie `slow`); `veryslow` na zintegrowanej grafice bywa kilka razy wolniejszy przy niewielkim zysku jakości |
@@ -194,6 +194,12 @@ dla AV1 przeliczone ×5 na skalę 0–255). Skale enkoderów nie są identyczne,
 podobną, ale nie taką samą jakość i rozmiar. AVC ma te same priorytety jakości co HEVC: na NVENC preset p7, tune hq, VBR z CQ,
 adaptacyjna kwantyzacja przestrzenna i czasowa, B-klatki referencyjne, pełny multipass, lookahead 32 klatek i CABAC;
 na Intelu profil High z ICQ (QSV) albo CQP (VAAPI).
+
+**Mapowanie tonów HDR → SDR (AVC).** AVC jest 8-bitowe, więc film HDR trzeba przeliczyć do SDR, inaczej wyglądałby
+wyprano i z pasmami. Krzywa Hable bez desaturacji, wynik BT.709. Liczone na karcie, gdy się da: NVIDIA — `tonemap_opencl`
+(wymaga OpenCL sterownika: na Linuksie pakiet `opencl-nvidia` / `nvidia-opencl-icd`, na Windows jest w sterowniku),
+Intel — `vpp_qsv` / `tonemap_vaapi`; zapasowo na CPU (`zscale` + `tonemap`, wolniej przy 4K). Który wariant działa,
+program sprawdza przed kodowaniem i pisze w logu. Profil Dolby Vision 5 (bez warstwy HDR10) nie jest obsługiwany.
 
 **Pliki wynikowe** trafiają do `~/Wideo` (zmiana w F7). Kontener domyślnie wynika ze źródła (`.mp4` → `.mp4`, wszystko
 inne → `.mkv`); w F7 albo `--container` można wymusić MKV lub MP4. Do MP4 audio w kodekach spoza MP4 (np. DTS,

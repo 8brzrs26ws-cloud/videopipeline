@@ -20,6 +20,9 @@ DOVI_TOOL_REF="${DOVI_TOOL_REF:-2.3.4}"
 HDR10PLUS_TOOL_REF="${HDR10PLUS_TOOL_REF:-1.7.2}"
 DAV1D_REF="${DAV1D_REF:-latest}"
 LIBVPL_REF="${LIBVPL_REF:-latest}"
+# Mapowanie tonów HDR → SDR (AVC): zimg (filtr zscale) i ładowarka OpenCL (tonemap_opencl na GPU).
+ZIMG_REF="${ZIMG_REF:-latest}"
+OPENCL_REF="${OPENCL_REF:-latest}"
 MKVTOOLNIX_VERSION="${MKVTOOLNIX_VERSION:-latest}"
 MEDIAINFO_VERSION="${MEDIAINFO_VERSION:-latest}"
 # mpv (F3): gotowa kompilacja shinchiro/mpv-winbuild-cmake (tag = data, np. 20261108); "latest" = najnowsza.
@@ -87,6 +90,8 @@ libvpl_latest() {
         | { grep -E '^v2\.[0-9]+\.[0-9]+$' || true; } | sed 's/^v//' | sort -V | tail -n1
 }
 resolve LIBVPL_REF "github.com/intel/libvpl" libvpl_latest
+resolve ZIMG_REF "github.com/sekrit-twc/zimg" latest_git_tag https://github.com/sekrit-twc/zimg.git release-
+resolve OPENCL_REF "github.com/KhronosGroup/OpenCL-ICD-Loader" latest_git_tag https://github.com/KhronosGroup/OpenCL-ICD-Loader.git
 # MKVToolNix — kilka źródeł po kolei, bo pojedyncze bywają niedostępne:
 # plik sprawdzania aktualizacji z mkvtoolnix.download, tagi "release-X.Y" (Codeberg, GitLab),
 # lista wydań dla Windows, a na końcu wersja już pobrana do cache.
@@ -182,7 +187,7 @@ cpu = 'x86_64'
 endian = 'little'
 EOF
 
-DEPSTAMP="dav1d=$DAV1D_REF libvpl=$LIBVPL_REF nvh=${NVCODEC_HEADERS_REF:-master}"
+DEPSTAMP="dav1d=$DAV1D_REF libvpl=$LIBVPL_REF nvh=${NVCODEC_HEADERS_REF:-master} zimg=$ZIMG_REF opencl=$OPENCL_REF"
 if [[ "$FORCE" = 1 || "$(cat "$DEPS/.stamp" 2>/dev/null)" != "$DEPSTAMP" ]]; then
     rm -rf "$DEPS" && mkdir -p "$DEPS"
 
@@ -211,6 +216,52 @@ if [[ "$FORCE" = 1 || "$(cat "$DEPS/.stamp" 2>/dev/null)" != "$DEPSTAMP" ]]; the
     [[ -n "$NVCODEC_HEADERS_REF" ]] && git -C "$WORK/nv-codec-headers" checkout --quiet "$NVCODEC_HEADERS_REF"
     make -C "$WORK/nv-codec-headers" PREFIX="$DEPS" install >/dev/null
 
+    # zimg (C++, statycznie) — filtr zscale do mapowania tonów HDR → SDR na CPU.
+    rm -rf "$WORK/zimg"
+    git -c advice.detachedHead=false clone --quiet --depth 1 --branch "release-$ZIMG_REF" \
+        --recurse-submodules --shallow-submodules https://github.com/sekrit-twc/zimg.git "$WORK/zimg"
+    (
+        cd "$WORK/zimg"
+        ./autogen.sh >/dev/null
+        ./configure --host="$TRIPLE" --prefix="$DEPS" --enable-static --disable-shared \
+            CC="$CC_W" CXX="$CXX_W" CFLAGS="-O2 -march=$TARGET_CPU" CXXFLAGS="-O2 -march=$TARGET_CPU" >/dev/null
+        make -j"$JOBS" >/dev/null
+        make install >/dev/null
+    )
+    [[ -f "$DEPS/lib/pkgconfig/zimg.pc" ]] || fail "zimg nie zainstalował zimg.pc"
+    grep -q -- '-lstdc++' "$DEPS/lib/pkgconfig/zimg.pc" || sed -i -E 's|^(Libs:.*)$|\1 -lstdc++|' "$DEPS/lib/pkgconfig/zimg.pc"
+
+    # Ładowarka OpenCL (Khronos ICD loader, statycznie): ffmpeg.exe nie zależy od OpenCL.dll,
+    # a sterownik karty (NVIDIA, Intel) dostarcza implementację w czasie działania.
+    build_opencl() {
+        rm -rf "$WORK/OpenCL-Headers" "$WORK/OpenCL-ICD-Loader"
+        git -c advice.detachedHead=false clone --quiet --depth 1 --branch "v$OPENCL_REF" \
+            https://github.com/KhronosGroup/OpenCL-Headers.git "$WORK/OpenCL-Headers" || return 1
+        cmake -S "$WORK/OpenCL-Headers" -B "$WORK/OpenCL-Headers/build" -G Ninja \
+            -DCMAKE_INSTALL_PREFIX="$DEPS" -DBUILD_TESTING=OFF >/dev/null || return 1
+        ninja -C "$WORK/OpenCL-Headers/build" install >/dev/null || return 1
+        git -c advice.detachedHead=false clone --quiet --depth 1 --branch "v$OPENCL_REF" \
+            https://github.com/KhronosGroup/OpenCL-ICD-Loader.git "$WORK/OpenCL-ICD-Loader" || return 1
+        cmake -S "$WORK/OpenCL-ICD-Loader" -B "$WORK/OpenCL-ICD-Loader/build" -G Ninja \
+            -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=x86_64 \
+            -DCMAKE_C_COMPILER="$CC_W" -DCMAKE_RC_COMPILER="$TRIPLE-windres" \
+            -DCMAKE_FIND_ROOT_PATH="/usr/$TRIPLE" -DCMAKE_PREFIX_PATH="$DEPS" \
+            -DOPENCL_ICD_LOADER_HEADERS_DIR="$DEPS/include" -DCMAKE_INSTALL_PREFIX="$DEPS" \
+            -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
+            -DBUILD_TESTING=OFF -DENABLE_OPENCL_LAYERINFO=OFF >/dev/null || return 1
+        ninja -C "$WORK/OpenCL-ICD-Loader/build" install >/dev/null || return 1
+        [[ -f "$DEPS/lib/libOpenCL.a" ]] || return 1
+        local pc="$DEPS/lib/pkgconfig/OpenCL.pc"
+        mkdir -p "$DEPS/lib/pkgconfig"
+        printf 'prefix=%s\nlibdir=${prefix}/lib\nincludedir=${prefix}/include\n\nName: OpenCL\nDescription: Khronos OpenCL ICD Loader (static)\nVersion: 3.0\nCflags: -I${includedir}\nLibs: -L${libdir} -lOpenCL -lcfgmgr32 -lole32 -lshlwapi -ldxgi -luuid\n' "$DEPS" > "$pc"
+    }
+    if build_opencl; then
+        touch "$DEPS/.opencl"
+    else
+        echo "UWAGA: ładowarka OpenCL się nie zbudowała — ffmpeg.exe bez tonemap_opencl (mapowanie tonów na CPU)" >&2
+        rm -f "$DEPS/.opencl"
+    fi
+
     echo "$DEPSTAMP" > "$DEPS/.stamp"
 fi
 
@@ -228,7 +279,8 @@ if [[ "$FORCE" = 1 || ! -f "$FFPREFIX/bin/ffmpeg.exe" || "$(cat "$FFPREFIX/.stam
         # Tylko nasze .pc — żadnych bibliotek Linuksa z kontenera.
         export PKG_CONFIG_LIBDIR="$DEPS/lib/pkgconfig:$DEPS/share/pkgconfig"
         export PKG_CONFIG_PATH=""
-        ./configure \
+        ffconfigure() {
+            ./configure \
             --prefix="$FFPREFIX" \
             --target-os=mingw32 --arch=x86_64 --cross-prefix="$TRIPLE-" \
             --cc="$CC_W" --cxx="$CXX_W" \
@@ -240,7 +292,15 @@ if [[ "$FORCE" = 1 || ! -f "$FFPREFIX/bin/ffmpeg.exe" || "$(cat "$FFPREFIX/.stam
             --disable-shared --enable-static \
             --enable-ffnvcodec --enable-nvenc --enable-nvdec --enable-cuda --enable-cuda-llvm \
             --enable-d3d11va --enable-dxva2 --enable-libvpl \
-            --enable-libdav1d --enable-zlib
+            --enable-libdav1d --enable-zlib --enable-libzimg "$@"
+        }
+        # tonemap_opencl tylko gdy ładowarka OpenCL się zbudowała i ffmpeg ją przyjmie.
+        if [[ -f "$DEPS/.opencl" ]] && ffconfigure --enable-opencl; then
+            :
+        else
+            echo "UWAGA: ffmpeg.exe bez OpenCL — mapowanie tonów HDR → SDR na CPU" >&2
+            ffconfigure
+        fi
         make -j"$JOBS"
         make install
         # ffmpeg.exe nie uruchomi się w kontenerze — sprawdzamy, co trafiło do konfiguracji.
@@ -259,10 +319,14 @@ FFCONF="$(cat "$FFPREFIX/config.h" "$FFPREFIX/config_components.h" 2>/dev/null |
 for c in HEVC_NVENC_ENCODER AV1_NVENC_ENCODER HEVC_QSV_ENCODER AV1_QSV_ENCODER EAC3_ENCODER \
          H264_QSV_DECODER HEVC_QSV_DECODER AV1_QSV_DECODER LIBDAV1D_DECODER \
          HWUPLOAD_CUDA_FILTER HWDOWNLOAD_FILTER BILATERAL_CUDA_FILTER HQDN3D_FILTER CROPDETECT_FILTER \
-         VPP_QSV_FILTER HWUPLOAD_FILTER MATROSKA_MUXER MP4_MUXER; do
+         VPP_QSV_FILTER HWUPLOAD_FILTER MATROSKA_MUXER MP4_MUXER H264_NVENC_ENCODER H264_QSV_ENCODER \
+         ZSCALE_FILTER TONEMAP_FILTER; do
     grep -q "^#define CONFIG_$c 1" <<<"$FFCONF" || fail "ffmpeg (Windows) bez $c"
 done
 echo "ffmpeg.exe: NVENC, QSV, CUDA i filtry obecne"
+grep -q "^#define CONFIG_TONEMAP_OPENCL_FILTER 1" <<<"$FFCONF" \
+    && echo "ffmpeg.exe: mapowanie tonów na GPU (tonemap_opencl)" \
+    || echo "UWAGA: ffmpeg.exe bez tonemap_opencl — mapowanie tonów HDR → SDR na CPU (zscale)"
 
 # ------------------------------------------------------------------ 5. MKVToolNix (mkvmerge.exe)
 log "5/6 MKVToolNix $MKVTOOLNIX_VERSION (wersja przenośna, mkvmerge.exe)"

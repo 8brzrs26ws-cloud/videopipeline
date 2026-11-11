@@ -105,7 +105,8 @@ case "$INTEL" in
 esac
 
 NVH="$CACHE/nv-codec-headers"
-prefix_for() { echo "$CACHE/ffmpeg-$FFMPEG_VERSION-gpl$([[ $1 = 1 ]] && echo -intel)"; }
+# -tm: z mapowaniem tonów (zscale/libzimg + OpenCL) — stary cache bez nich jest budowany od nowa.
+prefix_for() { echo "$CACHE/ffmpeg-$FFMPEG_VERSION-gpl-tm$([[ $1 = 1 ]] && echo -intel)"; }
 
 build_ffmpeg() {   # $1 = 1|0 (Intel); prefiks = prefix_for $1
     local intel="$1" prefix; prefix="$(prefix_for "$1")"
@@ -130,7 +131,8 @@ build_ffmpeg() {   # $1 = 1|0 (Intel); prefiks = prefix_for $1
             --disable-autodetect --disable-doc --disable-ffplay --disable-debug \
             --disable-shared --enable-static \
             --enable-ffnvcodec --enable-nvenc --enable-nvdec --enable-cuda --enable-cuda-llvm \
-            --enable-libdav1d --enable-zlib "${extra[@]}"
+            --enable-libdav1d --enable-zlib "${extra[@]}" \
+            --enable-libzimg --enable-opencl
         make -j"$JOBS"
         make install
     )

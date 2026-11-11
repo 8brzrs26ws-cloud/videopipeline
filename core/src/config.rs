@@ -219,6 +219,33 @@ pub enum Denoise {
     Cpu,
 }
 
+/// Mapowanie tonów HDR → SDR (AVC 8-bit ze źródła HDR): gdzie liczone.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Tonemap {
+    /// Niedostępne — pliki HDR w AVC są pomijane.
+    None,
+    /// tonemap_opencl (GPU przez OpenCL — NVIDIA, Intel).
+    OpenCl,
+    /// vpp_qsv tonemap=1 (Intel QSV).
+    Qsv,
+    /// tonemap_vaapi (Intel VAAPI).
+    Vaapi,
+    /// zscale + tonemap na CPU.
+    Cpu,
+}
+
+impl Tonemap {
+    pub fn label(self) -> &'static str {
+        match self {
+            Tonemap::None => "brak",
+            Tonemap::OpenCl => "OpenCL (GPU)",
+            Tonemap::Qsv => "vpp_qsv (GPU Intel)",
+            Tonemap::Vaapi => "tonemap_vaapi (GPU Intel)",
+            Tonemap::Cpu => "zscale + tonemap (CPU)",
+        }
+    }
+}
+
 /// Wynik pre-flightu, wspólny dla całego uruchomienia.
 pub struct Runtime {
     pub av1_tune: String,
@@ -228,6 +255,8 @@ pub struct Runtime {
     pub intel_dev: Option<PathBuf>,
     /// Dekodery QSV dostępne w ffmpeg (np. "hevc_qsv").
     pub qsv_decoders: Vec<String>,
+    /// Mapowanie tonów HDR → SDR dla AVC.
+    pub tonemap: Tonemap,
 }
 
 pub struct Paths {
