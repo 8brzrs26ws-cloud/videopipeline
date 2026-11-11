@@ -178,6 +178,9 @@ TrueHD) jest przekodowywane do E-AC-3 640k, napisy tekstowe do mov_text, a obraz
 Nazwa zawiera kodek i opcje, np. `film_hevc.mkv`, `film_hevc_qsv_cq22.mkv`, `film_av1_10bit_cq23_da.mkv`, więc wyniki
 z różnymi ustawieniami się nie nadpisują.
 
+**Analiza Dolby Vision i HDR10+** czyta strumień wideo raz dla obu narzędzi (dovi_tool i hdr10plus_tool dostają
+te same dane), a okno analizy pokazuje postęp odczytu: procent, pozycję w filmie, prędkość i szacowany czas do końca.
+
 **Bez plików tymczasowych.** Gdy w źródle nie ma Dolby Vision ani HDR10+ (albo ich analiza jest wyłączona: `-pdv`, `-ph`),
 a także zawsze dla AV1, ffmpeg koduje wideo i od razu zapisuje plik wynikowy razem z audio (kopia, a E-AC-3 z `-pleac3`
 / `-da` w locie) i napisami — bez pośrednich plików `.hevc`/`.eac3` i bez osobnego muksowania, więc dysk dostaje
