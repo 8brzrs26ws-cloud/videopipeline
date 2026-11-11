@@ -217,6 +217,7 @@ Kliknij miniaturę, żeby zobaczyć pełny rozmiar.
 Potrzebne: Rust (stable) oraz w `PATH`: ffmpeg i ffprobe z obsługą wybranej karty (NVENC/CUDA albo QSV/VAAPI),
 mkvmerge (mkvtoolnix), mediainfo, mpv (opcjonalnie, dla F3), [dovi_tool](https://github.com/quietvoid/dovi_tool), [hdr10plus_tool](https://github.com/quietvoid/hdr10plus_tool).
 
+    ./install-build-deps.sh --dev   # raz: Rust (rustup), ffmpeg, mkvtoolnix, mediainfo, mpv (Arch, Debian)
     ./build.sh       # target/release/videopipeline + libvideopipeline_core.so
     ./install.sh     # opcjonalnie: ~/.local/bin (z biblioteką libstd Rusta), ikona i wpis w menu
     ./uninstall.sh   # usuwa to, co zainstalował install.sh
@@ -254,6 +255,22 @@ Zmienne dla `build-local.sh`:
 | `TARGET_CPU` | domyślnie `x86-64-v3` |
 | `FORCE=1` | przebuduj ffmpeg i narzędzia mimo cache |
 | `DOCKER=podman` | Podman zamiast Dockera |
+
+### Budowanie na Windows (WSL)
+
+Na komputerze z Windows paczki buduje się w WSL tym samym `./build-local.sh` (Docker działa w WSL, kontener jest ten sam).
+
+1. PowerShell jako administrator: `wsl --install -d Debian`, potem w Debianie włącz systemd:
+   `printf '[boot]\nsystemd=true\n' | sudo tee /etc/wsl.conf` i w PowerShellu `wsl --shutdown`.
+2. W Debianie: `./install-build-deps.sh` (Docker, git, gh), ponownie `wsl --shutdown`, potem `./build-local.sh windows`.
+3. Test: `unzip -o dist/VideoPipeline-*-windows-x86_64_v3.zip -d /mnt/c/VideoPipeline-test`.
+
+Repozytorium trzymaj na systemie plików Linuksa — na dyskach Windows (`/mnt/c`, `/mnt/e`) git i build są wielokrotnie
+wolniejsze. Przy dual boocie można użyć repozytorium i cache z partycji Linuksa: `tools\wsl\mount-linux.cmd`
+(uruchamia się jako administrator) wyszukuje dyski z partycjami Linuksa, podłącza je do WSL, rozpoznaje system plików
+(ext4, btrfs, xfs, f2fs, LUKS) i montuje je w `/mnt/linux/<etykieta>`, a na końcu pokazuje znalezione repozytoria.
+`tools\wsl\mount-linux.cmd -Unmount` odłącza dyski. Ograniczenia: WSL nie podłączy dysku, na którym jest Windows;
+podłączony dysk znika z Windows na czas montowania; Linux musi być zamknięty normalnie (nie hibernacja).
 
 To samo robi ręcznie uruchamiany workflow GitHub Actions (`.github/workflows/release.yml`).
 Licencje dołączonych składników: [`packaging/appimage/THIRD-PARTY-NOTICES.md`](packaging/appimage/THIRD-PARTY-NOTICES.md).

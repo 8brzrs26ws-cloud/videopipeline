@@ -1,0 +1,5 @@
+# Skrypty powłoki zawsze z LF (także po sklonowaniu na Windows / w WSL na dysku Windows).
+*.sh text eol=lf
+# Narzędzia uruchamiane w Windows (tools/wsl) — CRLF.
+tools/wsl/*.cmd text eol=crlf
+tools/wsl/*.ps1 text eol=crlf
