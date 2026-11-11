@@ -1,9 +1,9 @@
 use crate::config::*;
 use anyhow::{bail, Result};
-use std::{fs, path::Path, process::Command};
+use std::{fs, path::Path};
 
 fn ffmpeg_text(args: &[&str]) -> String {
-    match Command::new("ffmpeg").args(args).output() {
+    match crate::proc::command("ffmpeg").args(args).output() {
         Ok(o) => format!(
             "{}\n{}",
             String::from_utf8_lossy(&o.stdout),
@@ -16,7 +16,7 @@ fn ffmpeg_text(args: &[&str]) -> String {
 /// Krótki, prawdziwy encode na GPU — sama obecność w -encoders nic nie gwarantuje.
 fn av1_selftest(tune: &str, cq: u8, out: &Path) -> bool {
     let _ = fs::remove_file(out);
-    let ok = Command::new("ffmpeg")
+    let ok = crate::proc::command("ffmpeg")
         .args(["-hide_banner", "-y", "-loglevel", "error"])
         .args(["-f", "lavfi", "-i", "color=c=black:s=320x180:r=24:d=0.25"])
         .args(["-an", "-frames:v", "6", "-c:v", "av1_nvenc", "-preset", "p7"])

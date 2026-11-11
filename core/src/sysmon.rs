@@ -10,7 +10,7 @@ use crate::winmon::GpuEngineSampler as IntelSampler;
 use std::{
     path::Path,
     io::{BufRead, BufReader},
-    process::{Command, Stdio},
+    process::Stdio,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
@@ -81,7 +81,7 @@ fn gpu_thread(slot: Arc<Mutex<Option<GpuStats>>>, pid: Arc<Mutex<Option<u32>>>, 
         if stop.load(Ordering::SeqCst) {
             return;
         }
-        let Ok(mut child) = Command::new("nvidia-smi")
+        let Ok(mut child) = crate::proc::command("nvidia-smi")
             .arg(format!("--query-gpu={}", fields.join(",")))
             .args(["--format=csv,noheader,nounits", "-l", "1"])
             .stdin(Stdio::null())

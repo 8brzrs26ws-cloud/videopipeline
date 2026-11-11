@@ -1,6 +1,6 @@
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, path::Path, process::Command};
+use std::{collections::HashMap, path::Path};
 
 #[derive(Deserialize, Default)]
 struct ProbeJson {
@@ -97,7 +97,7 @@ fn color_from(s: &StreamJson) -> ColorProfile {
 }
 
 pub fn probe(input: &Path) -> Result<Media> {
-    let out = Command::new("ffprobe")
+    let out = crate::proc::command("ffprobe")
         .args(["-v", "error", "-show_streams", "-show_format", "-of", "json"])
         .arg(input)
         .output()
@@ -135,7 +135,7 @@ pub fn probe(input: &Path) -> Result<Media> {
 }
 
 fn probe_value(path: &Path, args: &[&str]) -> Option<String> {
-    let out = Command::new("ffprobe")
+    let out = crate::proc::command("ffprobe")
         .args(["-v", "error"])
         .args(args)
         .args(["-of", "default=noprint_wrappers=1:nokey=1"])

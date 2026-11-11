@@ -9,11 +9,11 @@ use anyhow::{bail, Result};
 use std::{
     fs,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::Stdio,
 };
 
 fn run_quiet(cmd: &str, args: &[String]) -> bool {
-    proc::run(Command::new(cmd).args(args).stdin(Stdio::null())) == Some(0)
+    proc::run(crate::proc::command(cmd).args(args).stdin(Stdio::null())) == Some(0)
 }
 
 fn s(p: &Path) -> String {
@@ -86,7 +86,7 @@ fn mux_mkv(opts: &Opts, a: &Analysis, p: &Paths, current_video: &Path) -> Result
     }
 
     // mkvmerge zwraca 1 dla samych ostrzeżeń — to nadal sukces.
-    let ok = proc::run(Command::new("mkvmerge").args(&cmd).stdin(Stdio::null())).map_or(false, |c| c <= 1);
+    let ok = proc::run(crate::proc::command("mkvmerge").args(&cmd).stdin(Stdio::null())).map_or(false, |c| c <= 1);
     if !ok {
         bail!("błąd mkvmerge — pliki tymczasowe pozostają, kolejne uruchomienie wznowi proces");
     }
