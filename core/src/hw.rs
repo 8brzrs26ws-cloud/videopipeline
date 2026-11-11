@@ -4,7 +4,7 @@
 use crate::config::{Codec, Engine};
 use std::{
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::Stdio,
     thread,
     time::{Duration, Instant},
 };
@@ -207,7 +207,7 @@ fn test_args(e: Engine, c: Codec, dev: Option<&Path>) -> Option<Vec<String>> {
 
 /// Uruchamia ffmpeg z limitem czasu: (kod wyjścia 0?, komunikaty ffmpeg ze stderr).
 fn run_with_timeout(args: &[String]) -> (bool, String) {
-    let mut child = match Command::new("ffmpeg")
+    let mut child = match crate::proc::command("ffmpeg")
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -303,13 +303,13 @@ pub fn detect_report() -> (HwInfo, Vec<TestReport>, Vec<(String, bool, String, S
 
 /// Wersja ffmpeg (pierwsza linia `ffmpeg -version`).
 pub fn ffmpeg_version() -> Option<String> {
-    let out = Command::new("ffmpeg").arg("-version").stdin(Stdio::null()).output().ok()?;
+    let out = crate::proc::command("ffmpeg").arg("-version").stdin(Stdio::null()).output().ok()?;
     String::from_utf8_lossy(&out.stdout).lines().next().map(str::to_string)
 }
 
 /// Lista enkoderów ffmpeg (druga kolumna `ffmpeg -encoders`); None = ffmpeg nie działa.
 fn ffmpeg_encoders() -> Option<Vec<String>> {
-    let out = Command::new("ffmpeg")
+    let out = crate::proc::command("ffmpeg")
         .args(["-hide_banner", "-nostdin", "-encoders"])
         .stdin(Stdio::null())
         .output()

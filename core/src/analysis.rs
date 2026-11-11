@@ -10,7 +10,7 @@ use std::{
     collections::HashMap,
     fs,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::Stdio,
 };
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -57,7 +57,7 @@ impl Analysis {
 
 /// ffmpeg (copy -> Annex B HEVC) | narzędzie czytające ze stdin.
 fn pipe_hevc(input: &Path, tool: &str, tool_args: &[&str]) {
-    let Ok(mut ff) = Command::new("ffmpeg")
+    let Ok(mut ff) = crate::proc::command("ffmpeg")
         .args(["-hide_banner", "-loglevel", "quiet", "-i"])
         .arg(input)
         .args(["-map", "0:v:0", "-c:v", "copy", "-bsf:v", "hevc_mp4toannexb", "-f", "hevc", "-"])
@@ -74,7 +74,7 @@ fn pipe_hevc(input: &Path, tool: &str, tool_args: &[&str]) {
         proc::unregister(ff_id);
         return;
     };
-    let _ = proc::run(Command::new(tool).args(tool_args).stdin(Stdio::from(out)));
+    let _ = proc::run(crate::proc::command(tool).args(tool_args).stdin(Stdio::from(out)));
     let _ = ff.kill();
     let _ = ff.wait();
     proc::unregister(ff_id);
@@ -119,7 +119,7 @@ fn detect_crop(
             break;
         }
         let Some(out) = proc::output(
-            Command::new("ffmpeg")
+            crate::proc::command("ffmpeg")
                 .args(["-hide_banner", "-ss", &ts.to_string(), "-i"])
                 .arg(input)
                 .args(["-vframes", "15", "-vf"])

@@ -1,5 +1,6 @@
 //! Procesy potomne: rejestr PID-ów (do przerwania) i flaga anulowania.
 use std::{
+    ffi::OsStr,
     process::{Command, Output, Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -8,6 +9,22 @@ use std::{
     thread,
     time::Duration,
 };
+
+/// Polecenie dla narzędzia pomocniczego (ffmpeg, ffprobe, mkvmerge, mediainfo, dovi_tool…).
+/// Windows: proces nie dołącza się do konsoli programu (CREATE_NO_WINDOW) — narzędzie konsolowe
+/// nie może zmienić trybu konsoli ani zablokować okna z TUI (ConPTY w videopipeline-term, conhost,
+/// Windows Terminal). Wejście i wyjście narzędzi i tak są przekierowane (null, potok, plik).
+pub fn command(program: impl AsRef<OsStr>) -> Command {
+    #[allow(unused_mut)]
+    let mut cmd = Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
 
 pub static PIDS: Mutex<Vec<u32>> = Mutex::new(Vec::new());
 static CANCEL: AtomicBool = AtomicBool::new(false);

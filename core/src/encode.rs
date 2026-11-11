@@ -8,7 +8,7 @@ use crate::{
 use std::{
     fs::{self, File},
     path::{Path, PathBuf},
-    process::{Child, Command, ExitStatus, Stdio},
+    process::{Child, ExitStatus, Stdio},
     thread,
     time::Duration,
 };
@@ -355,7 +355,7 @@ fn start(
     panel.set(&a.filename, State::Nvenc, format!("{eng} {slot}/2 — {note} — dekoder: {decoder}"));
 
     let logf = File::create(&log)?;
-    let child = Command::new("ffmpeg")
+    let child = crate::proc::command("ffmpeg")
         .args(&args)
         .stdin(Stdio::null())
         .stdout(Stdio::from(logf.try_clone()?))

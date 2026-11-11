@@ -4,7 +4,7 @@
 use serde_json::Value;
 use std::{
     path::Path,
-    process::{Command, Stdio},
+    process::Stdio,
 };
 
 /// Sekcja raportu jak w widoku „Easy” MediaInfo: tytuł i zwięzłe linie.
@@ -14,7 +14,7 @@ pub struct Section {
 }
 
 fn run(args: &[&std::ffi::OsStr]) -> Result<String, String> {
-    let out = Command::new("mediainfo")
+    let out = crate::proc::command("mediainfo")
         .args(args)
         .stdin(Stdio::null())
         .output()
