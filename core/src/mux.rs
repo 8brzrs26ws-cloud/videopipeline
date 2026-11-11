@@ -225,6 +225,23 @@ fn mux_mp4(opts: &Opts, a: &Analysis, p: &Paths, video: &Path, dynamic_hdr: bool
     Ok(())
 }
 
+fn non_empty(p: &Path) -> bool {
+    fs::metadata(p).map(|m| m.len() > 0).unwrap_or(false)
+}
+
+/// Poprzednia postać wideo po udanym kroku (wstrzyknięcie HDR10+ / Dolby Vision) — od razu z dysku,
+/// żeby naraz leżały najwyżej dwie pełne kopie. Wznowienie zaczyna się od ostatniego gotowego kroku.
+fn drop_intermediate(prev: &Path) {
+    let size = fs::metadata(prev).map(|m| m.len()).unwrap_or(0);
+    if fs::remove_file(prev).is_ok() {
+        plog!(
+            "    Usunięto plik pośredni {} ({:.1} GB)",
+            prev.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(),
+            size as f64 / 1e9
+        );
+    }
+}
+
 /// Pliki tymczasowe i analiza — po gotowym pliku wynikowym nie są już potrzebne.
 fn remove_temps(p: &Paths, analysis_file: &Path) {
     for f in [
@@ -311,9 +328,11 @@ pub fn run(opts: &Opts, a: &Analysis, analysis_file: &Path, panel: &mut Panel) -
                 panel.draw(" ETAP 3/3 — PIPELINE");
                 let args = ["inject", "-i", &s(&cur), "-j", &s(&p.temp_hdr10plus), "-o", &s(&p.step1)]
                     .map(String::from);
-                if !run_quiet("hdr10plus_tool", &args) {
+                if !run_quiet("hdr10plus_tool", &args) || !non_empty(&p.step1) {
+                    let _ = fs::remove_file(&p.step1); // niekompletny — nie może udawać gotowego przy wznowieniu
                     bail!("wstrzykiwanie HDR10+ nie powiodło się");
                 }
+                drop_intermediate(&cur);
                 cur = p.step1.clone();
             }
         }
@@ -328,9 +347,11 @@ pub fn run(opts: &Opts, a: &Analysis, analysis_file: &Path, panel: &mut Panel) -
                 panel.draw(" ETAP 3/3 — PIPELINE");
                 let args = ["inject-rpu", "-i", &s(&cur), "--rpu-in", &s(&p.temp_rpu), "-o", &s(&p.step2)]
                     .map(String::from);
-                if !run_quiet("dovi_tool", &args) {
+                if !run_quiet("dovi_tool", &args) || !non_empty(&p.step2) {
+                    let _ = fs::remove_file(&p.step2);
                     bail!("wstrzykiwanie Dolby Vision nie powiodło się");
                 }
+                drop_intermediate(&cur);
                 cur = p.step2.clone();
             }
         }

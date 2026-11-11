@@ -204,8 +204,9 @@ te same dane), a okno analizy pokazuje postęp odczytu: procent, pozycję w film
 a także zawsze dla AV1, ffmpeg koduje wideo i od razu zapisuje plik wynikowy razem z audio (kopia, a E-AC-3 z `-pleac3`
 / `-da` w locie) i napisami — bez pośrednich plików `.hevc`/`.eac3` i bez osobnego muksowania, więc dysk dostaje
 o połowę mniej zapisów. Do czasu ukończenia plik ma końcówkę `.part`. Z Dolby Vision / HDR10+ wideo przechodzi przez
-plik tymczasowy, bo metadane trzeba wstrzyknąć (dovi_tool, hdr10plus_tool) przed muksowaniem; przerwane kodowanie
-wznawia się wtedy od ostatniego ukończonego etapu.
+plik tymczasowy, bo metadane trzeba wstrzyknąć (dovi_tool, hdr10plus_tool) przed muksowaniem. Każdy plik pośredni
+jest usuwany zaraz po udanym kolejnym kroku, więc na dysku leżą naraz najwyżej dwie kopie wideo; przerwane kodowanie
+wznawia się od ostatniego ukończonego etapu.
 W MP4 Dolby Vision zostaje w strumieniu, ale bez rekordu konfiguracji — część odtwarzaczy pokaże wtedy zwykły HDR10.
 
 ## Galeria

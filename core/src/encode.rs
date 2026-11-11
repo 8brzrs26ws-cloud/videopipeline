@@ -527,6 +527,12 @@ pub fn run_stage(opts: &Opts, rt: &Runtime, files: &[Analysis], panel: &Panel) {
             panel.set(&a.filename, State::Done, "Plik wynikowy już istnieje");
             continue;
         }
+        // Wznowienie po częściowym etapie 3: wideo jest już po wstrzyknięciu HDR10+ / Dolby Vision
+        // (plik po NVENC/QSV został usunięty jako zbędny).
+        if (p.step1.exists() || p.step2.exists()) && !opts.direct_encode(a.has_dovi, a.has_hdr10plus) {
+            panel.set(&a.filename, State::NvencDone, "Kodowanie pominięte — wideo z metadanymi HDR już gotowe");
+            continue;
+        }
         if p.temp_video.exists() && !opts.direct_encode(a.has_dovi, a.has_hdr10plus) {
             if existing_temp_valid(opts, &p.temp_video, &a.input_file) {
                 panel.set(

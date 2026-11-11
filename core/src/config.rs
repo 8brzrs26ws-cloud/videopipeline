@@ -230,6 +230,14 @@ pub struct Paths {
     pub analysis: PathBuf,
 }
 
+impl Paths {
+    /// Zakodowane wideo w którejkolwiek postaci (po NVENC/QSV albo już z HDR10+ / Dolby Vision) —
+    /// pliki pośrednie są usuwane po każdym udanym kroku, więc może zostać tylko ostatni.
+    pub fn has_encoded_video(&self) -> bool {
+        self.temp_video.exists() || self.step1.exists() || self.step2.exists()
+    }
+}
+
 impl Opts {
     /// Np. "HEVC NVENC", "AV1 QSV".
     pub fn codec_label(&self) -> String {
