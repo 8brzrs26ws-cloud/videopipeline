@@ -105,8 +105,38 @@ case "$INTEL" in
 esac
 
 NVH="$CACHE/nv-codec-headers"
-# -tm: z mapowaniem tonów (zscale/libzimg + OpenCL) — stary cache bez nich jest budowany od nowa.
-prefix_for() { echo "$CACHE/ffmpeg-$FFMPEG_VERSION-gpl-tm$([[ $1 = 1 ]] && echo -intel)"; }
+
+# libplacebo dla ffmpeg (filtr libplacebo: mapowanie tonów HDR → SDR jak w mpv, skalowanie na GPU
+# przez Vulkan). Statycznie i bez linkowania z libvulkan — ffmpeg ładuje sterownik Vulkan w trakcie
+# działania. Kompilator shaderów: shaderc z systemu (linuxdeploy dołączy libshaderc).
+# LIBPLACEBO_REF=latest → najnowszy tag v7.x (wspólny z mpv niżej).
+LIBPLACEBO_REF="${LIBPLACEBO_REF:-latest}"
+if [[ "$LIBPLACEBO_REF" = latest ]]; then
+    LIBPLACEBO_REF="$({ GIT_TERMINAL_PROMPT=0 timeout 60 git ls-remote --tags --refs https://github.com/haasn/libplacebo.git 2>/dev/null || true; } \
+        | sed 's|.*refs/tags/||' | { grep -E '^v7\.[0-9]+\.[0-9]+$' || true; } | sed 's/^v//' | sort -V | tail -n1)"
+    if [[ -z "$LIBPLACEBO_REF" ]]; then
+        LIBPLACEBO_REF="$(ls -1d "$CACHE"/libplacebo-ff-* 2>/dev/null | sed 's|.*/libplacebo-ff-||' | sort -V | tail -n1)"
+    fi
+    [[ -n "$LIBPLACEBO_REF" ]] || fail "nie udało się ustalić wersji libplacebo — podaj LIBPLACEBO_REF=..."
+fi
+PLPREFIX="$CACHE/libplacebo-ff-$LIBPLACEBO_REF"
+if [[ "$FORCE" = 1 || ! -f "$PLPREFIX/lib/libplacebo.a" ]]; then
+    log "3/5 libplacebo $LIBPLACEBO_REF dla ffmpeg (statycznie, Vulkan + shaderc)"
+    rm -rf "$WORK/libplacebo-ff" "$PLPREFIX"
+    git -c advice.detachedHead=false clone --quiet --depth 1 --branch "v$LIBPLACEBO_REF" \
+        --recurse-submodules --shallow-submodules https://github.com/haasn/libplacebo.git "$WORK/libplacebo-ff"
+    meson setup "$WORK/libplacebo-ff/build" "$WORK/libplacebo-ff" --prefix="$PLPREFIX" --libdir=lib \
+        --buildtype=release --default-library=static -Dc_args="-march=$TARGET_CPU" -Dcpp_args="-march=$TARGET_CPU" \
+        -Ddemos=false -Dtests=false -Dvulkan=enabled -Dvk-proc-addr=disabled -Dshaderc=enabled \
+        -Dglslang=disabled -Dlcms=disabled -Dopengl=disabled -Dd3d11=disabled -Ddovi=enabled \
+        -Dlibdovi=disabled -Dxxhash=disabled -Dunwind=disabled
+    ninja -C "$WORK/libplacebo-ff/build" install >/dev/null
+fi
+[[ -f "$PLPREFIX/lib/pkgconfig/libplacebo.pc" ]] || fail "libplacebo nie zainstalowała libplacebo.pc"
+
+# -tm: z mapowaniem tonów (zscale/libzimg + OpenCL), -pl: z libplacebo/Vulkan — stary cache bez nich
+# jest budowany od nowa.
+prefix_for() { echo "$CACHE/ffmpeg-$FFMPEG_VERSION-gpl-tm-pl$LIBPLACEBO_REF$([[ $1 = 1 ]] && echo -intel)"; }
 
 build_ffmpeg() {   # $1 = 1|0 (Intel); prefiks = prefix_for $1
     local intel="$1" prefix; prefix="$(prefix_for "$1")"
@@ -122,7 +152,7 @@ build_ffmpeg() {   # $1 = 1|0 (Intel); prefiks = prefix_for $1
         || fail "nie udało się pobrać źródeł ffmpeg $FFMPEG_VERSION (ffmpeg.org ani GitHub)"
     (
         cd "$src"
-        export PKG_CONFIG_PATH="$NVH/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+        export PKG_CONFIG_PATH="$NVH/lib/pkgconfig:$PLPREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
         if ! ./configure \
             --prefix="$prefix" \
             --pkg-config-flags=--static \
@@ -132,7 +162,8 @@ build_ffmpeg() {   # $1 = 1|0 (Intel); prefiks = prefix_for $1
             --disable-shared --enable-static \
             --enable-ffnvcodec --enable-nvenc --enable-nvdec --enable-cuda --enable-cuda-llvm \
             --enable-libdav1d --enable-zlib "${extra[@]}" \
-            --enable-libzimg --enable-opencl; then
+            --enable-libzimg --enable-opencl \
+            --enable-vulkan --enable-libplacebo --extra-libs=-lstdc++; then
             # Powód błędu configure jest na końcu ffbuild/config.log — bez niego trudno coś naprawić.
             echo "---- ffbuild/config.log (koniec) ----" >&2
             tail -n 40 ffbuild/config.log >&2 || true
@@ -160,7 +191,7 @@ FILTERS="$("$FFMPEG" -hide_banner -filters 2>/dev/null)"
 for e in hevc_nvenc av1_nvenc h264_nvenc eac3; do
     grep -qw "$e" <<<"$ENCODERS" || fail "ffmpeg bez enkodera $e"
 done
-for f in hwupload_cuda hwdownload bilateral_cuda hqdn3d cropdetect zscale tonemap tonemap_opencl; do
+for f in hwupload_cuda hwdownload bilateral_cuda hqdn3d cropdetect zscale tonemap tonemap_opencl libplacebo; do
     grep -qw "$f" <<<"$FILTERS" || fail "ffmpeg bez filtra $f"
 done
 if [[ "$USE_INTEL" = 1 || "$FFPREFIX" == *-intel ]]; then
@@ -185,7 +216,6 @@ fi
 # dołączy je do paczki. libplacebo z Debiana bywa za stara dla nowego mpv, więc jest budowana razem
 # z mpv jako podprojekt meson (statycznie; LIBPLACEBO_REF, domyślnie najnowszy tag tej samej
 # wersji głównej, co wymagana przez mpv). Sterowniki grafiki (GL/EGL/Vulkan), X11/Wayland i ALSA są z hosta.
-LIBPLACEBO_REF="${LIBPLACEBO_REF:-latest}"
 if [[ "$MPV_VERSION" = latest ]]; then
     MPV_VERSION="$({ GIT_TERMINAL_PROMPT=0 timeout 60 git ls-remote --tags --refs https://github.com/mpv-player/mpv.git 2>/dev/null || true; } \
         | sed 's|.*refs/tags/||' | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } | sed 's/^v//' | sort -V | tail -n1)"

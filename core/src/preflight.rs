@@ -127,6 +127,7 @@ pub fn run(opts: &Opts) -> Result<Runtime> {
         intel_dev: None,
         qsv_decoders: vec![],
         tonemap: Tonemap::None,
+        vulkan_dev: String::new(),
     };
 
     plog!(
@@ -206,9 +207,16 @@ pub fn run(opts: &Opts) -> Result<Runtime> {
         }
     }
     if opts.codec == Codec::Avc {
-        rt.tonemap = detect_tonemap(opts, &rt);
+        let (t, vk) = detect_tonemap(opts, &rt);
+        rt.tonemap = t;
+        rt.vulkan_dev = vk;
         match rt.tonemap {
             Tonemap::None => plog!("UWAGA: ffmpeg nie ma filtrów mapowania tonów — pliki HDR w AVC zostaną pominięte."),
+            Tonemap::Placebo => plog!(
+                "AVC ze źródeł HDR: mapowanie tonów HDR → SDR BT.709 — {} (urządzenie Vulkan: {}).",
+                Tonemap::Placebo.label(),
+                rt.vulkan_dev
+            ),
             t => plog!("AVC ze źródeł HDR: mapowanie tonów HDR → SDR BT.709 — {}.", t.label()),
         }
     }
@@ -229,8 +237,9 @@ fn ffmpeg_ok(args: &[String]) -> bool {
         .is_ok_and(|s| s.success())
 }
 
-/// Najlepsze działające mapowanie tonów dla wybranej karty: najpierw GPU, zapasowo CPU.
-fn detect_tonemap(opts: &Opts, rt: &Runtime) -> Tonemap {
+/// Najlepsze działające mapowanie tonów dla wybranej karty: libplacebo (Vulkan, jakość jak w mpv),
+/// potem filtry sprzętowe karty, zapasowo CPU. Zwraca też urządzenie Vulkan dla libplacebo.
+fn detect_tonemap(opts: &Opts, rt: &Runtime) -> (Tonemap, String) {
     let sv = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<String>>();
     let run = |pre: Vec<String>, vf: &str| {
         let mut a = sv(&["-hide_banner", "-nostdin", "-loglevel", "error"]);
@@ -238,6 +247,17 @@ fn detect_tonemap(opts: &Opts, rt: &Runtime) -> Tonemap {
         a.extend(sv(&["-f", "lavfi", "-i", HDR_TEST_SRC, "-vf", vf, "-frames:v", "3", "-f", "null", "-"]));
         ffmpeg_ok(&a)
     };
+    // libplacebo: najpierw karta, na której kodujemy (nazwa urządzenia Vulkan), potem pierwsze urządzenie.
+    // VAAPI zostaje przy tonemap_vaapi — klatki muszą wrócić na kartę Intel przez urządzenie VAAPI.
+    if opts.engine != Engine::Vaapi {
+        let vf = crate::encode::tonemap_placebo(None, "yuv420p");
+        let hint = if opts.engine == Engine::Nvenc { "NVIDIA" } else { "Intel" };
+        for dev in [hint, "0"] {
+            if run(crate::encode::vulkan_args(dev), &vf) {
+                return (Tonemap::Placebo, dev.to_string());
+            }
+        }
+    }
     let dev = rt.intel_dev.as_ref().map(|d| d.to_string_lossy().to_string());
     let gpu = match (opts.engine, dev) {
         (Engine::Nvenc, _) => run(sv(&["-init_hw_device", "opencl=ocl", "-filter_hw_device", "ocl"]), crate::encode::TONEMAP_OPENCL)
@@ -254,5 +274,6 @@ fn detect_tonemap(opts: &Opts, rt: &Runtime) -> Tonemap {
         }
         _ => None,
     };
-    gpu.or_else(|| run(vec![], crate::encode::TONEMAP_CPU).then_some(Tonemap::Cpu)).unwrap_or(Tonemap::None)
+    let t = gpu.or_else(|| run(vec![], crate::encode::TONEMAP_CPU).then_some(Tonemap::Cpu)).unwrap_or(Tonemap::None);
+    (t, String::new())
 }

@@ -23,6 +23,10 @@ LIBVPL_REF="${LIBVPL_REF:-latest}"
 # Mapowanie tonów HDR → SDR (AVC): zimg (filtr zscale) i ładowarka OpenCL (tonemap_opencl na GPU).
 ZIMG_REF="${ZIMG_REF:-latest}"
 OPENCL_REF="${OPENCL_REF:-latest}"
+# libplacebo (mapowanie tonów jak w mpv, przez Vulkan): nagłówki Vulkan, glslang (kompilator shaderów).
+VULKAN_HEADERS_REF="${VULKAN_HEADERS_REF:-latest}"
+GLSLANG_REF="${GLSLANG_REF:-latest}"
+LIBPLACEBO_REF="${LIBPLACEBO_REF:-latest}"
 MKVTOOLNIX_VERSION="${MKVTOOLNIX_VERSION:-latest}"
 MEDIAINFO_VERSION="${MEDIAINFO_VERSION:-latest}"
 # mpv (F3): gotowa kompilacja shinchiro/mpv-winbuild-cmake (tag = data, np. 20261108); "latest" = najnowsza.
@@ -92,6 +96,9 @@ libvpl_latest() {
 resolve LIBVPL_REF "github.com/intel/libvpl" libvpl_latest
 resolve ZIMG_REF "github.com/sekrit-twc/zimg" latest_git_tag https://github.com/sekrit-twc/zimg.git release-
 resolve OPENCL_REF "github.com/KhronosGroup/OpenCL-ICD-Loader" latest_git_tag https://github.com/KhronosGroup/OpenCL-ICD-Loader.git
+resolve VULKAN_HEADERS_REF "github.com/KhronosGroup/Vulkan-Headers" latest_git_tag https://github.com/KhronosGroup/Vulkan-Headers.git
+resolve GLSLANG_REF "github.com/KhronosGroup/glslang" latest_git_tag https://github.com/KhronosGroup/glslang.git
+resolve LIBPLACEBO_REF "github.com/haasn/libplacebo" latest_git_tag https://github.com/haasn/libplacebo.git
 # MKVToolNix — kilka źródeł po kolei, bo pojedyncze bywają niedostępne:
 # plik sprawdzania aktualizacji z mkvtoolnix.download, tagi "release-X.Y" (Codeberg, GitLab),
 # lista wydań dla Windows, a na końcu wersja już pobrana do cache.
@@ -177,6 +184,7 @@ cpp = '$CXX_W'
 ar = '$TRIPLE-ar'
 strip = '$TRIPLE-strip'
 windres = '$TRIPLE-windres'
+dlltool = '$TRIPLE-dlltool'
 pkg-config = 'pkg-config'
 nasm = 'nasm'
 
@@ -187,7 +195,7 @@ cpu = 'x86_64'
 endian = 'little'
 EOF
 
-DEPSTAMP="dav1d=$DAV1D_REF libvpl=$LIBVPL_REF nvh=${NVCODEC_HEADERS_REF:-master} zimg=$ZIMG_REF opencl=$OPENCL_REF"
+DEPSTAMP="dav1d=$DAV1D_REF libvpl=$LIBVPL_REF nvh=${NVCODEC_HEADERS_REF:-master} zimg=$ZIMG_REF opencl=$OPENCL_REF vkh=$VULKAN_HEADERS_REF glslang=$GLSLANG_REF placebo=$LIBPLACEBO_REF"
 if [[ "$FORCE" = 1 || "$(cat "$DEPS/.stamp" 2>/dev/null)" != "$DEPSTAMP" ]]; then
     rm -rf "$DEPS" && mkdir -p "$DEPS"
 
@@ -262,6 +270,51 @@ if [[ "$FORCE" = 1 || "$(cat "$DEPS/.stamp" 2>/dev/null)" != "$DEPSTAMP" ]]; the
         rm -f "$DEPS/.opencl"
     fi
 
+    # libplacebo (filtr libplacebo: mapowanie tonów HDR → SDR jak w mpv, skalowanie na GPU) przez
+    # Vulkan. Statycznie, bez linkowania z vulkan-1.dll — ffmpeg ładuje ją ze sterownika w trakcie
+    # działania. Kompilator shaderów: glslang (statycznie, bez optymalizatora SPIRV-Tools).
+    build_placebo() {
+        rm -rf "$WORK/Vulkan-Headers" "$WORK/glslang" "$WORK/libplacebo"
+        git -c advice.detachedHead=false clone --quiet --depth 1 --branch "v$VULKAN_HEADERS_REF" \
+            https://github.com/KhronosGroup/Vulkan-Headers.git "$WORK/Vulkan-Headers" || return 1
+        cmake -S "$WORK/Vulkan-Headers" -B "$WORK/Vulkan-Headers/build" -G Ninja -DCMAKE_INSTALL_PREFIX="$DEPS" \
+            -DVULKAN_HEADERS_ENABLE_TESTS=OFF -DVULKAN_HEADERS_ENABLE_MODULE=OFF >/dev/null || return 1
+        ninja -C "$WORK/Vulkan-Headers/build" install >/dev/null || return 1
+
+        git -c advice.detachedHead=false clone --quiet --depth 1 --branch "$GLSLANG_REF" \
+            https://github.com/KhronosGroup/glslang.git "$WORK/glslang" || return 1
+        cmake -S "$WORK/glslang" -B "$WORK/glslang/build" -G Ninja \
+            -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=x86_64 \
+            -DCMAKE_C_COMPILER="$CC_W" -DCMAKE_CXX_COMPILER="$CXX_W" -DCMAKE_RC_COMPILER="$TRIPLE-windres" \
+            -DCMAKE_FIND_ROOT_PATH="/usr/$TRIPLE" -DCMAKE_INSTALL_PREFIX="$DEPS" -DCMAKE_INSTALL_LIBDIR=lib \
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DENABLE_OPT=OFF -DGLSLANG_TESTS=OFF \
+            -DGLSLANG_ENABLE_INSTALL=ON -DENABLE_GLSLANG_BINARIES=OFF -DENABLE_HLSL=OFF -DENABLE_SPVREMAPPER=OFF \
+            -DCMAKE_CXX_FLAGS="-O2 -march=$TARGET_CPU" >/dev/null || return 1
+        ninja -C "$WORK/glslang/build" install >/dev/null || return 1
+
+        git -c advice.detachedHead=false clone --quiet --depth 1 --branch "v$LIBPLACEBO_REF" \
+            --recurse-submodules --shallow-submodules https://github.com/haasn/libplacebo.git "$WORK/libplacebo" || return 1
+        PKG_CONFIG_LIBDIR="$DEPS/lib/pkgconfig" meson setup "$WORK/libplacebo/build" "$WORK/libplacebo" \
+            --cross-file "$CROSSFILE" --prefix="$DEPS" --libdir=lib --buildtype=release \
+            --default-library=static --prefer-static \
+            -Dc_args="-march=$TARGET_CPU -I$DEPS/include" -Dcpp_args="-march=$TARGET_CPU -I$DEPS/include" \
+            -Dc_link_args="-L$DEPS/lib" -Dcpp_link_args="-L$DEPS/lib" -Dvulkan-sdk="$DEPS" \
+            -Ddemos=false -Dtests=false -Dvulkan=enabled -Dvk-proc-addr=disabled -Dshaderc=disabled \
+            -Dglslang=enabled -Dlcms=disabled -Dopengl=disabled -Dd3d11=disabled -Ddovi=enabled \
+            -Dlibdovi=disabled -Dxxhash=disabled -Dunwind=disabled >/dev/null || return 1
+        ninja -C "$WORK/libplacebo/build" install >/dev/null || return 1
+        # Statyczny glslang: libplacebo musi stać przed bibliotekami glslang — meson zapisuje je w złej kolejności.
+        local pc="$DEPS/lib/pkgconfig/libplacebo.pc"
+        [[ -f "$pc" ]] || return 1
+        sed -i -E '/^Libs\.private:/d; s|^Libs:.*|Libs: -L${libdir} -lplacebo -lglslang-default-resource-limits -lSPIRV -lglslang -lMachineIndependent -lOSDependent -lGenericCodeGen -lshlwapi -lstdc++|' "$pc"
+    }
+    if build_placebo; then
+        touch "$DEPS/.placebo"
+    else
+        echo "UWAGA: libplacebo się nie zbudowała — ffmpeg.exe bez filtra libplacebo (mapowanie tonów OpenCL/CPU)" >&2
+        rm -f "$DEPS/.placebo"
+    fi
+
     echo "$DEPSTAMP" > "$DEPS/.stamp"
 fi
 
@@ -294,11 +347,16 @@ if [[ "$FORCE" = 1 || ! -f "$FFPREFIX/bin/ffmpeg.exe" || "$(cat "$FFPREFIX/.stam
             --enable-d3d11va --enable-dxva2 --enable-libvpl \
             --enable-libdav1d --enable-zlib --enable-libzimg "$@"
         }
-        # tonemap_opencl tylko gdy ładowarka OpenCL się zbudowała i ffmpeg ją przyjmie.
-        if [[ -f "$DEPS/.opencl" ]] && ffconfigure --enable-opencl; then
+        # tonemap_opencl i libplacebo tylko gdy ich biblioteki się zbudowały i ffmpeg je przyjmie.
+        gpu_tm=()
+        [[ -f "$DEPS/.opencl" ]] && gpu_tm+=(--enable-opencl)
+        [[ -f "$DEPS/.placebo" ]] && gpu_tm+=(--enable-vulkan --enable-libplacebo)
+        if ffconfigure "${gpu_tm[@]}"; then
             :
+        elif [[ -f "$DEPS/.opencl" ]] && ffconfigure --enable-opencl; then
+            echo "UWAGA: ffmpeg.exe bez libplacebo — mapowanie tonów OpenCL" >&2
         else
-            echo "UWAGA: ffmpeg.exe bez OpenCL — mapowanie tonów HDR → SDR na CPU" >&2
+            echo "UWAGA: ffmpeg.exe bez OpenCL i libplacebo — mapowanie tonów HDR → SDR na CPU" >&2
             ffconfigure
         fi
         make -j"$JOBS"
@@ -324,6 +382,9 @@ for c in HEVC_NVENC_ENCODER AV1_NVENC_ENCODER HEVC_QSV_ENCODER AV1_QSV_ENCODER E
     grep -q "^#define CONFIG_$c 1" <<<"$FFCONF" || fail "ffmpeg (Windows) bez $c"
 done
 echo "ffmpeg.exe: NVENC, QSV, CUDA i filtry obecne"
+grep -q "^#define CONFIG_LIBPLACEBO_FILTER 1" <<<"$FFCONF" \
+    && echo "ffmpeg.exe: mapowanie tonów libplacebo (Vulkan, jak w mpv)" \
+    || echo "UWAGA: ffmpeg.exe bez libplacebo — mapowanie tonów gorszej jakości (OpenCL / CPU)"
 grep -q "^#define CONFIG_TONEMAP_OPENCL_FILTER 1" <<<"$FFCONF" \
     && echo "ffmpeg.exe: mapowanie tonów na GPU (tonemap_opencl)" \
     || echo "UWAGA: ffmpeg.exe bez tonemap_opencl — mapowanie tonów HDR → SDR na CPU (zscale)"

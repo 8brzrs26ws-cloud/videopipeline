@@ -127,6 +127,23 @@ tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p";
 /// GPU przez OpenCL (NVIDIA / Intel): klatki z pamięci → karta → z powrotem (koder NVENC bierze z pamięci).
 pub(crate) const TONEMAP_OPENCL: &str = "format=p010le,hwupload,tonemap_opencl=tonemap=hable:desat=0:\
 t=bt709:m=bt709:p=bt709:r=tv:format=nv12,hwdownload,format=nv12";
+/// libplacebo (Vulkan): mapowanie tonów jak w mpv (gpu-next) — krzywa „auto” (spline), mapowanie gamy
+/// perceptualne, wykrywanie szczytowej jasności, odzyskiwanie kontrastu, RPU Dolby Vision i HDR10+
+/// z klatek źródła, dithering przy przejściu do 8 bitów. Przy skalowaniu do 1080p zmniejsza też obraz
+/// (EWA Lanczos) — w jednym przejściu na karcie. Klatki z pamięci i do pamięci (koder bierze z RAM).
+pub(crate) fn tonemap_placebo(scale: Option<&Scale>, format: &str) -> String {
+    let size = scale.map(|s| format!("w={}:h={}:downscaler=ewa_lanczos:", s.dst.0, s.dst.1)).unwrap_or_default();
+    format!(
+        "libplacebo={size}format={format}:colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv:\
+tonemapping=auto:gamut_mode=perceptual:peak_detect=1:contrast_recovery=0.3:apply_dolbyvision=1:dithering=blue"
+    )
+}
+
+/// Urządzenie Vulkan dla libplacebo (nazwa karty, np. "NVIDIA", albo numer).
+pub(crate) fn vulkan_args(dev: &str) -> Vec<String> {
+    vec!["-init_hw_device".into(), format!("vulkan=vk:{dev}"), "-filter_hw_device".into(), "vk".into()]
+}
+
 /// Intel QSV: opcje vpp_qsv (sprzętowe mapowanie tonów z metadanych HDR źródła).
 pub(crate) const TONEMAP_QSV: &str = "tonemap=1:out_color_matrix=bt709:out_color_primaries=bt709:out_color_transfer=bt709";
 /// Intel VAAPI: filtr po hwupload / dekodowaniu VAAPI.
@@ -186,6 +203,13 @@ fn build_args_nvenc(
                 chain.push(DENOISE_CPU_FILTER.into());
                 note = "SDR 8-bit + CPU denoise";
             }
+            filt = vec!["-vf".into(), chain.join(",")];
+        } else if tonemap && rt.tonemap == Tonemap::Placebo {
+            // Skalowanie robi libplacebo (na karcie, razem z mapowaniem tonów) — bez skalowania na CPU.
+            let mut chain: Vec<String> = a.crop.iter().cloned().collect();
+            chain.push(tonemap_placebo(scale.as_ref(), "yuv420p"));
+            hw = vulkan_args(&rt.vulkan_dev);
+            note = "HDR -> SDR AVC 8-bit (tone mapping libplacebo)";
             filt = vec!["-vf".into(), chain.join(",")];
         } else if tonemap {
             let mut chain: Vec<String> = pre.clone();
@@ -346,7 +370,8 @@ fn build_args_intel(
     let denoise = opts.denoise && c.is_sdr_8bit && rt.denoise != Denoise::Off;
     // AVC ze źródła HDR: mapowanie tonów (sprzętowe Intel albo CPU — wtedy klatki przez pamięć).
     let tonemap = opts.codec == Codec::Avc && c.is_hdr();
-    let cpu_tonemap = tonemap && !matches!(rt.tonemap, Tonemap::Qsv | Tonemap::Vaapi);
+    let placebo = tonemap && rt.tonemap == Tonemap::Placebo && opts.engine == Engine::Qsv;
+    let cpu_tonemap = tonemap && !placebo && !matches!(rt.tonemap, Tonemap::Qsv | Tonemap::Vaapi);
     let cq = opts.cq() as u32;
 
     let mut v = sv(&["-hide_banner", "-nostats", "-progress"]);
@@ -354,7 +379,10 @@ fn build_args_intel(
 
     let mut notes: Vec<String> = vec![match (c.is_sdr_8bit, opts.codec) {
         (true, _) => "SDR 8-bit".into(),
-        (false, Codec::Avc) if tonemap => format!("HDR → SDR AVC 8-bit (tone mapping {})", if cpu_tonemap { "CPU" } else { "GPU Intel" }),
+        (false, Codec::Avc) if tonemap => format!(
+            "HDR → SDR AVC 8-bit (tone mapping {})",
+            if placebo { "libplacebo" } else if cpu_tonemap { "CPU" } else { "GPU Intel" }
+        ),
         (false, Codec::Avc) => "SDR 10-bit → AVC 8-bit".into(),
         (false, _) => "HDR 10-bit".into(),
     }];
@@ -373,11 +401,14 @@ fn build_args_intel(
             // dekoder QSV oddaje klatki do pamięci, filtry CPU, koder QSV sam wgrywa je na kartę.
             let sysmem = crate::hw::qsv_is_sysmem(&dev);
             v.extend(crate::hw::qsv_init_args(&dev));
-            if !sysmem {
+            if placebo {
+                // libplacebo bierze urządzenie Vulkan; koder QSV dostaje klatki z pamięci.
+                v.extend(vulkan_args(&rt.vulkan_dev));
+            } else if !sysmem {
                 v.extend(sv(&["-filter_hw_device", "qs"]));
             }
-            // Filtry na CPU (Windows "sysmem" albo mapowanie tonów na CPU): klatki z dekodera do pamięci.
-            let cpu_filters = sysmem || cpu_tonemap;
+            // Filtry na CPU (Windows "sysmem", mapowanie tonów na CPU albo libplacebo): klatki do pamięci.
+            let cpu_filters = sysmem || cpu_tonemap || placebo;
             match qsv_decoder(rt, src_codec) {
                 Some(d) if cpu_filters => {
                     v.extend(sv(&["-c:v", &d]));
@@ -398,7 +429,9 @@ fn build_args_intel(
                 if let Some(cr) = &a.crop {
                     chain.push(cr.clone());
                 }
-                if let Some(s) = &scale {
+                if placebo {
+                    chain.push(tonemap_placebo(scale.as_ref(), if ten_bit { "p010le" } else { "nv12" }));
+                } else if let Some(s) = &scale {
                     chain.push(s.cpu());
                 }
                 if cpu_tonemap {

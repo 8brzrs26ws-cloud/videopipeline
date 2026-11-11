@@ -198,10 +198,14 @@ adaptacyjna kwantyzacja przestrzenna i czasowa, B-klatki referencyjne, pełny mu
 na Intelu profil High z ICQ (QSV) albo CQP (VAAPI).
 
 **Mapowanie tonów HDR → SDR (AVC).** AVC jest 8-bitowe, więc film HDR trzeba przeliczyć do SDR, inaczej wyglądałby
-wyprano i z pasmami. Krzywa Hable bez desaturacji, wynik BT.709. Liczone na karcie, gdy się da: NVIDIA — `tonemap_opencl`
-(wymaga OpenCL sterownika: na Linuksie pakiet `opencl-nvidia` / `nvidia-opencl-icd`, na Windows jest w sterowniku),
-Intel — `vpp_qsv` / `tonemap_vaapi`; zapasowo na CPU (`zscale` + `tonemap`, wolniej przy 4K). Który wariant działa,
-program sprawdza przed kodowaniem i pisze w logu. Profil Dolby Vision 5 (bez warstwy HDR10) nie jest obsługiwany.
+wyprano i z pasmami. Domyślnie robi to **libplacebo** przez Vulkan — ten sam silnik, którego używa mpv (`gpu-next`),
+z tymi samymi ustawieniami: krzywa „auto”, perceptualne mapowanie gamy, wykrywanie szczytowej jasności sceny,
+odzyskiwanie kontrastu, metadane dynamiczne Dolby Vision (RPU) i HDR10+ z pliku źródłowego oraz dithering do 8 bitów.
+Wynik wygląda więc tak, jak film odtwarzany w mpv na ekranie SDR. Przy `--1080p` libplacebo od razu zmniejsza obraz
+(EWA Lanczos). Wymaga sterownika Vulkan (NVIDIA i Intel go mają; na Linuksie `vulkan-icd-loader` / `libvulkan1`).
+Gdy Vulkan nie działa, program bierze zapasowo filtry karty: NVIDIA — `tonemap_opencl` (OpenCL sterownika),
+Intel — `vpp_qsv` / `tonemap_vaapi` (VAAPI zawsze tak), a w ostateczności CPU (`zscale` + `tonemap`, krzywa Hable).
+Który wariant działa, program sprawdza przed kodowaniem i pisze w logu. Profil Dolby Vision 5 (bez warstwy HDR10) nie jest obsługiwany.
 
 **Pliki wynikowe** trafiają do `~/Wideo` (zmiana w F7). Kontener domyślnie wynika ze źródła (`.mp4` → `.mp4`, wszystko
 inne → `.mkv`); w F7 albo `--container` można wymusić MKV lub MP4. Do MP4 audio w kodekach spoza MP4 (np. DTS,

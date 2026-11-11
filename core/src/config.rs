@@ -229,6 +229,8 @@ pub enum Denoise {
 pub enum Tonemap {
     /// Niedostępne — pliki HDR w AVC są pomijane.
     None,
+    /// libplacebo przez Vulkan — ten sam silnik co mpv (gpu-next), z metadanymi DV / HDR10+.
+    Placebo,
     /// tonemap_opencl (GPU przez OpenCL — NVIDIA, Intel).
     OpenCl,
     /// vpp_qsv tonemap=1 (Intel QSV).
@@ -243,6 +245,7 @@ impl Tonemap {
     pub fn label(self) -> &'static str {
         match self {
             Tonemap::None => "brak",
+            Tonemap::Placebo => "libplacebo (Vulkan, jak mpv)",
             Tonemap::OpenCl => "OpenCL (GPU)",
             Tonemap::Qsv => "vpp_qsv (GPU Intel)",
             Tonemap::Vaapi => "tonemap_vaapi (GPU Intel)",
@@ -262,6 +265,8 @@ pub struct Runtime {
     pub qsv_decoders: Vec<String>,
     /// Mapowanie tonów HDR → SDR dla AVC.
     pub tonemap: Tonemap,
+    /// Urządzenie Vulkan dla libplacebo (nazwa albo numer, jak w -init_hw_device vulkan=vk:…).
+    pub vulkan_dev: String,
 }
 
 pub struct Paths {

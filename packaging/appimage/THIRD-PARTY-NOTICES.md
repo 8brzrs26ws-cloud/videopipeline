@@ -13,7 +13,10 @@
 | MKVToolNix (mkvmerge) — Linux: z bibliotekami z dystrybucji Debian; Windows: oficjalna wersja przenośna | GPL-2.0 | https://mkvtoolnix.download/source.html |
 | MediaInfo (CLI; Linux: z bibliotekami z dystrybucji Debian, Windows: oficjalne CLI MediaArea) | BSD-2-Clause | https://mediaarea.net/MediaInfo |
 | mpv (odtwarzacz pod F3) — Linux: budowany ze źródeł z bibliotekami z dystrybucji Debian (FFmpeg/libav*, libass, shaderc, Lua…); Windows: gotowa kompilacja shinchiro/mpv-winbuild-cmake | GPL-2.0+ | https://github.com/mpv-player/mpv, https://github.com/shinchiro/mpv-winbuild-cmake |
-| libplacebo (Linux: statycznie w mpv, budowana ze źródeł) | LGPL-2.1+ | https://code.videolan.org/videolan/libplacebo |
+| libplacebo (statycznie w ffmpeg — filtr libplacebo; Linux: także w mpv; budowana ze źródeł) | LGPL-2.1+ | https://code.videolan.org/videolan/libplacebo |
+| glslang (Windows: statycznie w ffmpeg.exe, kompilator shaderów libplacebo) | BSD-3-Clause / BSD-2-Clause / MIT / Apache-2.0 | https://github.com/KhronosGroup/glslang |
+| shaderc (Linux: kompilator shaderów libplacebo, z Debiana) | Apache-2.0 | https://github.com/google/shaderc |
+| Vulkan-Headers (nagłówki; ffmpeg ładuje sterownik Vulkan w trakcie działania) | Apache-2.0 / MIT | https://github.com/KhronosGroup/Vulkan-Headers |
 | Alacritty (terminal `videopipeline-term`, budowany ze źródeł z podmienioną ikoną) | Apache-2.0 (LICENSE-ALACRITTY) | https://github.com/alacritty/alacritty |
 | dovi_tool | MIT | https://github.com/quietvoid/dovi_tool |
 | hdr10plus_tool | MIT | https://github.com/quietvoid/hdr10plus_tool |
