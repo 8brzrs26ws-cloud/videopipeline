@@ -123,7 +123,7 @@ build_ffmpeg() {   # $1 = 1|0 (Intel); prefiks = prefix_for $1
     (
         cd "$src"
         export PKG_CONFIG_PATH="$NVH/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
-        ./configure \
+        if ! ./configure \
             --prefix="$prefix" \
             --pkg-config-flags=--static \
             --extra-cflags="-march=$TARGET_CPU -O2" \
@@ -132,7 +132,12 @@ build_ffmpeg() {   # $1 = 1|0 (Intel); prefiks = prefix_for $1
             --disable-shared --enable-static \
             --enable-ffnvcodec --enable-nvenc --enable-nvdec --enable-cuda --enable-cuda-llvm \
             --enable-libdav1d --enable-zlib "${extra[@]}" \
-            --enable-libzimg --enable-opencl
+            --enable-libzimg --enable-opencl; then
+            # Powód błędu configure jest na końcu ffbuild/config.log — bez niego trudno coś naprawić.
+            echo "---- ffbuild/config.log (koniec) ----" >&2
+            tail -n 40 ffbuild/config.log >&2 || true
+            exit 1
+        fi
         make -j"$JOBS"
         make install
     )
@@ -141,16 +146,10 @@ build_ffmpeg() {   # $1 = 1|0 (Intel); prefiks = prefix_for $1
 # Katalog z sufiksem (-gpl, -intel): stary cache o innej konfiguracji nie zostanie użyty ponownie.
 FFPREFIX="$(prefix_for "$USE_INTEL")"
 if [[ "$FORCE" = 1 || ! -x "$FFPREFIX/bin/ffmpeg" ]]; then
-    if ! build_ffmpeg "$USE_INTEL"; then
-        if [[ "$USE_INTEL" = 1 && "$INTEL" = auto ]]; then
-            echo "UWAGA: ffmpeg z Intelem się nie zbudował — próba bez Intela (INTEL=1 wymusza błąd)"
-            USE_INTEL=0
-            FFPREFIX="$(prefix_for 0)"
-            build_ffmpeg 0
-        else
-            fail "budowanie ffmpeg nie powiodło się"
-        fi
-    fi
+    # Bez cichego cofania się do ffmpeg bez Intela: paczka bez QSV/VAAPI wyglądałaby na sprawną,
+    # a na komputerze z samą kartą Intel program nie wykryłby żadnego enkodera.
+    # Świadomie bez Intela: INTEL=0.
+    build_ffmpeg "$USE_INTEL" || fail "budowanie ffmpeg nie powiodło się$([[ $USE_INTEL = 1 ]] && echo " (z Intelem: QSV/VAAPI; bez Intela: INTEL=0)")"
 fi
 
 FFMPEG="$FFPREFIX/bin/ffmpeg"
@@ -158,14 +157,14 @@ FFMPEG="$FFPREFIX/bin/ffmpeg"
 # Sprawdzamy, że ffmpeg ma wszystko, czego wymaga videopipeline (lista nie wymaga GPU).
 ENCODERS="$("$FFMPEG" -hide_banner -encoders 2>/dev/null)"
 FILTERS="$("$FFMPEG" -hide_banner -filters 2>/dev/null)"
-for e in hevc_nvenc av1_nvenc eac3; do
+for e in hevc_nvenc av1_nvenc h264_nvenc eac3; do
     grep -qw "$e" <<<"$ENCODERS" || fail "ffmpeg bez enkodera $e"
 done
-for f in hwupload_cuda hwdownload bilateral_cuda hqdn3d cropdetect; do
+for f in hwupload_cuda hwdownload bilateral_cuda hqdn3d cropdetect zscale tonemap tonemap_opencl; do
     grep -qw "$f" <<<"$FILTERS" || fail "ffmpeg bez filtra $f"
 done
 if [[ "$USE_INTEL" = 1 || "$FFPREFIX" == *-intel ]]; then
-    for e in hevc_qsv av1_qsv hevc_vaapi av1_vaapi; do
+    for e in hevc_qsv av1_qsv h264_qsv hevc_vaapi av1_vaapi h264_vaapi; do
         grep -qw "$e" <<<"$ENCODERS" || fail "ffmpeg (Intel) bez enkodera $e"
     done
     for f in vpp_qsv scale_vaapi denoise_vaapi hwupload; do
@@ -176,6 +175,8 @@ if [[ "$USE_INTEL" = 1 || "$FFPREFIX" == *-intel ]]; then
         grep -qw "$d" <<<"$DECODERS" || fail "ffmpeg (Intel) bez dekodera $d"
     done
     echo "ffmpeg: Intel VAAPI + QSV włączone"
+else
+    echo "UWAGA: ffmpeg BEZ Intela (QSV/VAAPI) — karty Intel nie będą działać (INTEL=$INTEL)"
 fi
 "$FFMPEG" -hide_banner -version | sed -n 1p
 
