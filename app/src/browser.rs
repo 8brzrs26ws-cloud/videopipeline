@@ -21,26 +21,168 @@ fn shift_range(cur: usize, d: isize, len: usize) -> (std::ops::Range<usize>, usi
     (range, n)
 }
 
-/// Windows: istniejące dyski poza bieżącym, jako katalogi "C:".
-#[cfg(windows)]
-fn other_drives(cwd: &std::path::Path) -> Vec<Entry> {
-    let cur = cwd.to_string_lossy().to_uppercase();
-    (b'A'..=b'Z')
-        .map(|l| format!("{}:\\", l as char))
-        .filter(|d| !cur.starts_with(d.as_str()) && std::path::Path::new(d).is_dir())
-        .map(|d| Entry {
-            name: d.trim_end_matches('\\').to_string(),
-            path: PathBuf::from(&d),
-            is_dir: true,
-            is_up: false,
-            size: 0,
-            mtime: None,
-        })
-        .collect()
+/// Dysk / zamontowany system plików pokazywany pod zawartością katalogu.
+#[derive(Clone, Default)]
+pub struct DriveInfo {
+    pub label: Option<String>,
+    pub total: Option<u64>,
+    pub free: Option<u64>,
 }
 
-#[cfg(not(windows))]
-fn other_drives(_cwd: &std::path::Path) -> Vec<Entry> {
+/// Windows: dyski C:, D: … z etykietą woluminu i miejscem.
+#[cfg(windows)]
+fn drives() -> Vec<(PathBuf, String, DriveInfo)> {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetVolumeInformationW(
+            root: *const u16,
+            name: *mut u16,
+            name_len: u32,
+            serial: *mut u32,
+            max_comp: *mut u32,
+            flags: *mut u32,
+            fs_name: *mut u16,
+            fs_len: u32,
+        ) -> i32;
+        fn GetDiskFreeSpaceExW(root: *const u16, avail: *mut u64, total: *mut u64, free: *mut u64) -> i32;
+        fn GetLogicalDrives() -> u32;
+    }
+    // SAFETY: maska dysków z systemu; bufory o podanych rozmiarach, ścieżki zakończone zerem.
+    let mask = unsafe { GetLogicalDrives() };
+    let mut out = vec![];
+    for i in 0..26u32 {
+        if mask & (1 << i) == 0 {
+            continue;
+        }
+        let letter = (b'A' + i as u8) as char;
+        let root = format!("{letter}:\\");
+        if !std::path::Path::new(&root).is_dir() {
+            continue; // np. czytnik kart / napęd bez nośnika
+        }
+        let w: Vec<u16> = root.encode_utf16().chain(Some(0)).collect();
+        let mut name = [0u16; 261];
+        let label = unsafe {
+            GetVolumeInformationW(
+                w.as_ptr(),
+                name.as_mut_ptr(),
+                name.len() as u32,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                0,
+            )
+        } != 0;
+        let label = label
+            .then(|| String::from_utf16_lossy(&name[..name.iter().position(|c| *c == 0).unwrap_or(0)]))
+            .filter(|l| !l.is_empty());
+        let (mut avail, mut total, mut free) = (0u64, 0u64, 0u64);
+        let ok = unsafe { GetDiskFreeSpaceExW(w.as_ptr(), &mut avail, &mut total, &mut free) } != 0;
+        out.push((
+            PathBuf::from(&root),
+            format!("{letter}:"),
+            DriveInfo { label, total: ok.then_some(total), free: ok.then_some(avail) },
+        ));
+    }
+    out
+}
+
+/// Linux: zamontowane systemy plików z /proc/self/mountinfo — dyski lokalne, pendrive'y
+/// (/run/media), udziały sieciowe; bez systemowych (/proc, /sys, /boot, /snap…).
+/// Podwolumeny btrfs jednego dysku (/, /home, /var/cache…) jako jedna pozycja (najkrótsza ścieżka).
+#[cfg(target_os = "linux")]
+fn drives() -> Vec<(PathBuf, String, DriveInfo)> {
+    use std::collections::BTreeMap;
+    const FS: &[&str] = &[
+        "ext2", "ext3", "ext4", "btrfs", "xfs", "f2fs", "bcachefs", "zfs", "vfat", "exfat", "ntfs", "ntfs3",
+        "fuseblk", "nfs", "nfs4", "cifs", "smb3", "9p", "virtiofs", "fuse.sshfs", "fuse.rclone",
+    ];
+    const HIDDEN: &[&str] = &[
+        "/proc", "/sys", "/dev", "/run", "/snap", "/boot", "/efi", "/tmp", "/usr", "/var", "/mnt/wslg", "/init",
+    ];
+    // \040 → spacja itd. (mountinfo zapisuje znaki specjalne ósemkowo).
+    fn unescape(s: &str) -> String {
+        let b = s.as_bytes();
+        let mut out = Vec::with_capacity(b.len());
+        let mut i = 0;
+        while i < b.len() {
+            if b[i] == b'\\' && i + 3 < b.len() && b[i + 1..i + 4].iter().all(|c| (b'0'..=b'7').contains(c)) {
+                out.push(u8::from_str_radix(&s[i + 1..i + 4], 8).unwrap_or(b'?'));
+                i += 4;
+            } else {
+                out.push(b[i]);
+                i += 1;
+            }
+        }
+        String::from_utf8_lossy(&out).into_owned()
+    }
+    let hidden = |mp: &str| {
+        !mp.starts_with("/run/media/")
+            && HIDDEN.iter().any(|h| mp == *h || mp.starts_with(&format!("{h}/")))
+    };
+    // Etykiety: /dev/disk/by-label/<etykieta> → urządzenie.
+    let mut labels: BTreeMap<PathBuf, String> = BTreeMap::new();
+    if let Ok(rd) = fs::read_dir("/dev/disk/by-label") {
+        for e in rd.flatten() {
+            if let Ok(dev) = fs::canonicalize(e.path()) {
+                let name = e.file_name().to_string_lossy().replace("\\x20", " ");
+                labels.insert(dev, name);
+            }
+        }
+    }
+    let Ok(text) = fs::read_to_string("/proc/self/mountinfo") else { return vec![] };
+    // klucz: urządzenie (major:minor) albo źródło udziału sieciowego → (punkt montowania, źródło, lokalny?)
+    let mut best: BTreeMap<String, (String, String, bool)> = BTreeMap::new();
+    for line in text.lines() {
+        let f: Vec<&str> = line.split(' ').collect();
+        let Some(dash) = f.iter().position(|x| *x == "-") else { continue };
+        if dash < 5 || f.len() < dash + 3 {
+            continue;
+        }
+        let (fstype, source, mp) = (f[dash + 1], unescape(f[dash + 2]), unescape(f[4]));
+        if !FS.contains(&fstype) || hidden(&mp) {
+            continue;
+        }
+        let local = source.starts_with("/dev/");
+        let key = if local { f[2].to_string() } else { source.clone() };
+        let better = |old: &str| {
+            let rank = |p: &str| (p != "/", p.matches('/').count(), p.len());
+            rank(&mp) < rank(old)
+        };
+        if best.get(&key).is_none_or(|(old, _, _)| better(old)) {
+            best.insert(key, (mp, source, local));
+        }
+    }
+    let mut out: Vec<(PathBuf, String, DriveInfo)> = best
+        .into_values()
+        .map(|(mp, source, local)| {
+            let label = fs::canonicalize(&source).ok().and_then(|d| labels.get(&d).cloned());
+            // Rozmiar tylko dla dysków lokalnych — statvfs na zerwanym udziale sieciowym potrafi zawisnąć.
+            let (total, free) = if local { statvfs(&mp) } else { (None, None) };
+            let label = label.or_else(|| (!local).then(|| source.clone()));
+            (PathBuf::from(&mp), mp, DriveInfo { label, total, free })
+        })
+        .collect();
+    out.sort_by(|a, b| (a.1 != "/", &a.1).cmp(&(b.1 != "/", &b.1)));
+    out
+}
+
+#[cfg(target_os = "linux")]
+fn statvfs(path: &str) -> (Option<u64>, Option<u64>) {
+    let Ok(c) = std::ffi::CString::new(path) else { return (None, None) };
+    // SAFETY: ścieżka zakończona zerem, struktura wypełniana przez libc.
+    unsafe {
+        let mut st: libc::statvfs = std::mem::zeroed();
+        if libc::statvfs(c.as_ptr(), &mut st) != 0 {
+            return (None, None);
+        }
+        let bs = st.f_frsize as u64;
+        (Some(st.f_blocks as u64 * bs), Some(st.f_bavail as u64 * bs))
+    }
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+fn drives() -> Vec<(PathBuf, String, DriveInfo)> {
     vec![]
 }
 
@@ -51,6 +193,17 @@ pub struct Entry {
     pub is_up: bool,
     pub size: u64,
     pub mtime: Option<SystemTime>,
+    /// Pozycja z listy dysków (pod zawartością katalogu).
+    pub drive: Option<DriveInfo>,
+    /// Linia oddzielająca zawartość katalogu od listy dysków (nie da się jej wybrać).
+    pub sep: bool,
+}
+
+impl Entry {
+    /// "..", separator i dyski — nie są plikami/katalogami do zaznaczania, usuwania czy kolejki.
+    pub fn is_special(&self) -> bool {
+        self.is_up || self.sep || self.drive.is_some()
+    }
 }
 
 pub struct Browser {
@@ -99,6 +252,8 @@ impl Browser {
                         path: path.clone(),
                         is_dir,
                         is_up: false,
+                        drive: None,
+                        sep: false,
                     };
                     if is_dir {
                         dirs.push(entry);
@@ -121,18 +276,46 @@ impl Browser {
                 is_up: true,
                 size: 0,
                 mtime: None,
+                drive: None,
+                sep: false,
             });
-        } else {
-            // Windows: w katalogu głównym dysku pokaż pozostałe dyski (C:\ → D:\ …).
-            entries.extend(other_drives(&self.cwd));
         }
         entries.extend(dirs);
         entries.extend(files);
+        // Pod zawartością katalogu, za linią: dyski (Windows) / zamontowane systemy plików (Linux).
+        let drives = drives();
+        if !drives.is_empty() {
+            entries.push(Entry {
+                name: String::new(),
+                path: PathBuf::new(),
+                is_dir: false,
+                is_up: false,
+                size: 0,
+                mtime: None,
+                drive: None,
+                sep: true,
+            });
+            for (path, name, info) in drives {
+                entries.push(Entry {
+                    name,
+                    path,
+                    is_dir: true,
+                    is_up: false,
+                    size: info.total.unwrap_or(0),
+                    mtime: None,
+                    drive: Some(info),
+                    sep: false,
+                });
+            }
+        }
         self.entries = entries;
 
         let len = self.entries.len();
-        let by_name = select.and_then(|n| self.entries.iter().position(|e| e.name == n));
-        let idx = by_name.or(prev.map(|i| i.min(len.saturating_sub(1)))).unwrap_or(0);
+        let by_name = select.and_then(|n| self.entries.iter().position(|e| e.name == n && e.drive.is_none()));
+        let mut idx = by_name.or(prev.map(|i| i.min(len.saturating_sub(1)))).unwrap_or(0);
+        if self.entries.get(idx).is_some_and(|e| e.sep) {
+            idx = idx.saturating_sub(1);
+        }
         self.state.select(if len > 0 { Some(idx) } else { None });
     }
 
@@ -145,7 +328,7 @@ impl Browser {
         if !self.marked.is_empty() {
             return self.marked.iter().cloned().collect();
         }
-        self.selected().filter(|e| !e.is_up).map(|e| vec![e.path.clone()]).unwrap_or_default()
+        self.selected().filter(|e| !e.is_special()).map(|e| vec![e.path.clone()]).unwrap_or_default()
     }
 
     pub fn move_by(&mut self, d: isize) {
@@ -154,8 +337,13 @@ impl Browser {
             return;
         }
         let cur = self.state.selected().unwrap_or(0) as isize;
-        let n = (cur + d).clamp(0, len as isize - 1);
-        self.state.select(Some(n as usize));
+        let mut n = (cur + d).clamp(0, len as isize - 1);
+        // Separatora nie da się wybrać: przeskocz go w kierunku ruchu (na krańcu listy — cofnij).
+        if self.entries[n as usize].sep {
+            let step = if d >= 0 { 1 } else { -1 };
+            n = if (0..len as isize).contains(&(n + step)) { n + step } else { n - step };
+        }
+        self.state.select(Some(n.clamp(0, len as isize - 1) as usize));
     }
 
     pub fn go_up(&mut self) {
@@ -177,7 +365,7 @@ impl Browser {
         let (range, n) = shift_range(cur, d, len);
         for i in range {
             if let Some(e) = self.entries.get(i) {
-                if !e.is_up {
+                if !e.is_special() {
                     self.marked.insert(e.path.clone());
                 }
             }
@@ -187,14 +375,14 @@ impl Browser {
 
     /// '+' — zaznacz wszystkie pliki (bez katalogów).
     pub fn mark_all(&mut self) {
-        for e in self.entries.iter().filter(|e| !e.is_up && !e.is_dir) {
+        for e in self.entries.iter().filter(|e| !e.is_special() && !e.is_dir) {
             self.marked.insert(e.path.clone());
         }
     }
 
     /// '*' — odwróć zaznaczenie plików.
     pub fn invert_marks(&mut self) {
-        for e in self.entries.iter().filter(|e| !e.is_up && !e.is_dir) {
+        for e in self.entries.iter().filter(|e| !e.is_special() && !e.is_dir) {
             if !self.marked.remove(&e.path) {
                 self.marked.insert(e.path.clone());
             }
@@ -208,7 +396,7 @@ impl Browser {
     /// Enter: katalog -> wejdź; plik -> zwróć ścieżkę.
     pub fn activate(&mut self) -> Option<PathBuf> {
         let (is_up, is_dir, path) = {
-            let e = self.selected()?;
+            let e = self.selected().filter(|e| !e.sep)?;
             (e.is_up, e.is_dir, e.path.clone())
         };
         if is_up {
@@ -235,7 +423,7 @@ impl Browser {
     /// Zaznacza/odznacza bieżącą pozycję bez przesuwania kursora (kliknięcie myszą).
     pub fn toggle_mark_here(&mut self) -> bool {
         let path = match self.selected() {
-            Some(e) if !e.is_up => e.path.clone(),
+            Some(e) if !e.is_special() => e.path.clone(),
             _ => return false,
         };
         if !self.marked.remove(&path) {

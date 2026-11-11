@@ -392,7 +392,7 @@ impl App {
             paths.extend(self.browser.marked.iter().cloned());
             self.browser.marked.clear();
         } else if let Some(e) = self.browser.selected() {
-            if !e.is_up {
+            if !e.is_special() {
                 paths.push(e.path.clone());
             }
         }
@@ -556,7 +556,7 @@ impl App {
     /// F3: odtwórz bieżący plik (lewy panel) albo pozycję kolejki (prawy panel) w mpv.
     fn play_selected(&mut self) {
         let path = match self.focus {
-            Focus::Left => self.browser.selected().filter(|e| !e.is_dir && !e.is_up).map(|e| e.path.clone()),
+            Focus::Left => self.browser.selected().filter(|e| !e.is_dir && !e.is_special()).map(|e| e.path.clone()),
             Focus::Right => self.queue.state.selected().and_then(|i| self.queue.items.get(i)).map(|q| q.path.clone()),
         };
         let Some(path) = path else {
@@ -573,7 +573,7 @@ impl App {
     /// F2: informacje o bieżącym pliku (lewy panel) albo pozycji kolejki (prawy panel).
     fn begin_mediainfo(&mut self) {
         let path = match self.focus {
-            Focus::Left => self.browser.selected().filter(|e| !e.is_dir && !e.is_up).map(|e| e.path.clone()),
+            Focus::Left => self.browser.selected().filter(|e| !e.is_dir && !e.is_special()).map(|e| e.path.clone()),
             Focus::Right => self.queue.state.selected().and_then(|i| self.queue.items.get(i)).map(|q| q.path.clone()),
         };
         let Some(path) = path else {
@@ -662,7 +662,7 @@ impl App {
                     Focus::Right => (self.queue.state.offset(), self.queue.items.len()),
                 };
                 let idx = offset + row;
-                if idx >= len {
+                if idx >= len || (panel == Focus::Left && self.browser.entries[idx].sep) {
                     return;
                 }
                 match panel {
@@ -681,12 +681,12 @@ impl App {
                     Some((p, i, t)) if p == panel && i == idx && now.duration_since(t) < Duration::from_millis(450));
                 self.last_click = if double { None } else { Some((panel, idx, now)) };
                 // Pojedyncze kliknięcie na pliku w lewym panelu zaznacza go / odznacza (jak Spacja).
-                if !double && panel == Focus::Left && self.browser.selected().is_some_and(|e| !e.is_dir && !e.is_up) {
+                if !double && panel == Focus::Left && self.browser.selected().is_some_and(|e| !e.is_dir && !e.is_special()) {
                     self.browser.toggle_mark_here();
                 }
                 if double && panel == Focus::Left {
                     let (is_file, path) = match self.browser.selected() {
-                        Some(e) => (!e.is_dir && !e.is_up, e.path.clone()),
+                        Some(e) => (!e.is_dir && !e.is_special(), e.path.clone()),
                         None => return,
                     };
                     if is_file {
@@ -783,7 +783,7 @@ impl App {
             self.status_msg = "F4 zmienia nazwę w lewym panelu".into();
             return;
         }
-        let Some(e) = self.browser.selected().filter(|e| !e.is_up) else {
+        let Some(e) = self.browser.selected().filter(|e| !e.is_special()) else {
             self.status_msg = "Nic nie wybrano".into();
             return;
         };

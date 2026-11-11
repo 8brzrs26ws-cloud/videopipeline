@@ -173,15 +173,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let panel_w = if left_active { cols[0].width } else { cols[1].width };
     let name_w = (panel_w as usize).saturating_sub(2).saturating_sub(20).max(4);
     let sel_label = if left_active {
-        app.browser.selected().map(|e| {
-            if e.is_up {
-                "/..".to_string()
-            } else if e.is_dir {
-                format!("/{}", e.name)
-            } else {
-                e.name.clone()
-            }
-        })
+        app.browser.selected().map(entry_label)
     } else {
         app.queue
             .state
@@ -300,6 +292,25 @@ fn render_topbar(f: &mut Frame, area: Rect, o: &Opts, queued: usize) {
     f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
+/// Nazwa pozycji lewego panelu: katalogi z "/", dyski z etykietą (Windows: "D:  Dane",
+/// Linux: "/run/media/damian/USB  Pendrive").
+fn entry_label(e: &crate::browser::Entry) -> String {
+    if e.is_up {
+        "/..".to_string()
+    } else if e.sep {
+        String::new()
+    } else if let Some(d) = &e.drive {
+        match &d.label {
+            Some(l) => format!("{}  {l}", e.name),
+            None => e.name.clone(),
+        }
+    } else if e.is_dir {
+        format!("/{}", e.name)
+    } else {
+        e.name.clone()
+    }
+}
+
 fn render_left(f: &mut Frame, area: Rect, b: &mut Browser, active: bool, shift: usize) {
     let title = tail(&b.cwd.to_string_lossy(), (area.width as usize).saturating_sub(6));
     let block = panel_block(&title, BOX_ALL, active);
@@ -320,24 +331,35 @@ fn render_left(f: &mut Frame, area: Rect, b: &mut Browser, active: bool, shift: 
         .iter()
         .enumerate()
         .map(|(i, e)| {
+            if e.sep {
+                // Linia oddzielająca zawartość katalogu od dysków.
+                let head = "── Dyski ";
+                let rest = (name_w + 20).saturating_sub(head.chars().count());
+                return ListItem::new(Line::from(Span::styled(format!("{head}{}", "─".repeat(rest)), fg(DIM))));
+            }
             let marked = b.marked.contains(&e.path);
-            let (label, style) = if e.is_up {
-                ("/..".to_string(), bold(TITLE))
+            let label = entry_label(e);
+            let style = if e.drive.is_some() {
+                bold(G_LOW)
             } else if e.is_dir {
-                (format!("/{}", e.name), bold(TITLE))
+                bold(TITLE)
             } else {
-                (e.name.clone(), fg(TEXT))
+                fg(TEXT)
             };
             let style = if marked { bold(G_MID) } else { style };
             let label = if Some(i) == sel && shift > 0 { label.chars().skip(shift).collect() } else { label };
-            let size = if e.is_up {
-                "UP--DIR".to_string()
+            let (size, date) = if let Some(d) = &e.drive {
+                (
+                    d.total.map(human).unwrap_or_else(|| "DYSK".into()),
+                    d.free.map(|f| format!("{} wolne", human(f))).unwrap_or_default(),
+                )
+            } else if e.is_up {
+                ("UP--DIR".to_string(), String::new())
             } else if e.is_dir {
-                "SUB-DIR".to_string()
+                ("SUB-DIR".to_string(), e.mtime.map(fmt_time).unwrap_or_default())
             } else {
-                human(e.size)
+                (human(e.size), e.mtime.map(fmt_time).unwrap_or_default())
             };
-            let date = e.mtime.map(fmt_time).unwrap_or_default();
             ListItem::new(Line::from(vec![
                 Span::styled(pad(&label, name_w), style),
                 Span::styled("│", fg(DIM)),

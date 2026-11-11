@@ -61,7 +61,7 @@ Do kodowania na Intelu doinstaluj `intel-media-driver` i `vpl-gpu-rt`; na NVIDII
 **Windows** — rozpakuj `VideoPipeline-*-windows-x86_64_v3.zip` i uruchom `videopipeline.exe` (dwuklik otwiera okno
 konsoli; najlepiej wygląda w Windows Terminal). Wszystkie pliki muszą zostać w jednym folderze. Pliki nie są podpisane
 cyfrowo, więc SmartScreen może poprosić o potwierdzenie. Pliki przeciągnięte na `videopipeline.exe` są od razu kodowane
-(tryb skryptowy). W lewym panelu, w katalogu głównym dysku, widać pozostałe dyski.
+(tryb skryptowy). Pod zawartością katalogu lewy panel pokazuje dyski z etykietami i wolnym miejscem.
 `utworz-skrot.cmd` z paczki tworzy skrót „VideoPipeline” na pulpicie i w menu Start (zob. niżej: okno programu).
 
 Sumy kontrolne leżą obok plików (`.sha256`).
@@ -104,6 +104,10 @@ po lewej pliki, po prawej kolejkę kodowania.
 | F10, Ctrl+C | wyjście |
 | Ctrl+L | przerysuj ekran (gdy terminal zostawi resztki okna) |
 | Mysz | klik — kursor i zaznaczenie pliku; podwójny klik — zaznaczone + kliknięty plik do kolejki (na katalogu: wejście); prawy klik — MediaInfo; kółko — przewijanie; klik na pasku F1–F10 — klawisz. Zaznaczanie tekstu w terminalu: z wciśniętym Shift |
+
+Pod zawartością katalogu, za linią „Dyski”, lewy panel pokazuje dyski: na Windows litery z etykietami woluminów,
+na Linuksie zamontowane systemy plików (dyski, pendrive'y w `/run/media`, udziały sieciowe) z etykietą; obok rozmiar
+i wolne miejsce. Enter na dysku przechodzi do niego.
 
 Długa nazwa zaznaczonego pliku, która nie mieści się w kolumnie, przewija się sama, więc da się ją przeczytać
 przy każdym rozmiarze okna.
