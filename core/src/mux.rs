@@ -351,9 +351,22 @@ pub fn run(opts: &Opts, a: &Analysis, analysis_file: &Path, panel: &mut Panel) -
                 }
                 panel.set(name, State::Dv, "Wstrzykiwanie Dolby Vision");
                 panel.draw(" ETAP 3/3 — PIPELINE");
-                let args = ["inject-rpu", "-i", &s(&cur), "--rpu-in", &s(&p.temp_rpu), "-o", &s(&p.step2)]
+                // Skalowanie do 1080p: obszar aktywny (L5) w RPU przeliczony do nowej rozdzielczości.
+                let mut rpu_in = p.temp_rpu.clone();
+                if let Some(sc) = crate::encode::scale_target(opts, a) {
+                    let mut rpus = dolby_vision::rpu::utils::parse_rpu_file(&p.temp_rpu)?;
+                    if crate::inject::scale_l5(&mut rpus, sc.factors())? > 0 {
+                        rpu_in = p.temp_rpu.with_extension("1080p.bin");
+                        crate::inject::write_rpu_file(&rpu_in, &rpus)?;
+                    }
+                }
+                let args = ["inject-rpu", "-i", &s(&cur), "--rpu-in", &s(&rpu_in), "-o", &s(&p.step2)]
                     .map(String::from);
-                if !run_quiet("dovi_tool", &args) || !non_empty(&p.step2) {
+                let ok = run_quiet("dovi_tool", &args) && non_empty(&p.step2);
+                if rpu_in != p.temp_rpu {
+                    let _ = fs::remove_file(&rpu_in);
+                }
+                if !ok {
                     let _ = fs::remove_file(&p.step2);
                     bail!("wstrzykiwanie Dolby Vision nie powiodło się");
                 }

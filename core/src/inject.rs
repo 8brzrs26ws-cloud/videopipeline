@@ -36,8 +36,45 @@ pub struct Metadata {
     pub converted_p7: bool,
 }
 
+/// Przesunięcia obszaru aktywnego (L5, czarne pasy) po zmianie rozdzielczości obrazu.
+/// Zwraca liczbę RPU z L5 innym niż zero.
+pub fn scale_l5(rpus: &mut [DoviRpu], (sx, sy): (f64, f64)) -> Result<usize> {
+    use dolby_vision::rpu::extension_metadata::blocks::ExtMetadataBlock;
+    let mut n = 0;
+    for r in rpus.iter_mut() {
+        let Some(ExtMetadataBlock::Level5(b)) = r.vdr_dm_data.as_ref().and_then(|d| d.get_block(5)).cloned() else {
+            continue;
+        };
+        let (l, rt, t, bo) = (
+            b.active_area_left_offset,
+            b.active_area_right_offset,
+            b.active_area_top_offset,
+            b.active_area_bottom_offset,
+        );
+        if l == 0 && rt == 0 && t == 0 && bo == 0 {
+            continue;
+        }
+        let s = |v: u16, f: f64| (v as f64 * f).round() as u16;
+        r.set_active_area_offsets(s(l, sx), s(rt, sx), s(t, sy), s(bo, sy))?;
+        n += 1;
+    }
+    Ok(n)
+}
+
+/// Zapis RPU w formacie dovi_tool (Annex-B, NAL 62) — dla starej ścieżki.
+pub fn write_rpu_file(path: &Path, rpus: &[DoviRpu]) -> Result<()> {
+    let mut out = std::io::BufWriter::new(std::fs::File::create(path)?);
+    for r in rpus {
+        out.write_all(&[0, 0, 0, 1])?;
+        out.write_all(&r.write_hevc_unspec62_nalu()?)?;
+    }
+    out.flush()?;
+    Ok(())
+}
+
 impl Metadata {
-    pub fn load(rpu: Option<&Path>, hdr10plus_json: Option<&Path>) -> Result<Self> {
+    /// `l5_scale`: współczynniki skalowania obrazu (szerokość, wysokość) — przelicza obszar aktywny L5.
+    pub fn load(rpu: Option<&Path>, hdr10plus_json: Option<&Path>, l5_scale: Option<(f64, f64)>) -> Result<Self> {
         let mut rpus = match rpu {
             Some(p) => dolby_vision::rpu::utils::parse_rpu_file(p)
                 .with_context(|| format!("odczyt RPU {}", p.display()))?,
@@ -49,6 +86,9 @@ impl Metadata {
                 r.convert_with_mode(ConversionMode::To81).context("konwersja RPU profilu 7 → 8.1")?;
             }
             converted_p7 = true;
+        }
+        if let Some(f) = l5_scale {
+            scale_l5(&mut rpus, f)?;
         }
         let dv_profile = rpus.first().map(|r| r.dovi_profile).unwrap_or(0);
         let hdr10plus = match hdr10plus_json {
@@ -836,6 +876,28 @@ mod tests {
         assert_eq!(dovi_level(3840, 2160, (24000, 1001)), 6);
         assert_eq!(dovi_level(1920, 1080, (24, 1)), 3);
         assert_eq!(dovi_level(1280, 720, (24000, 1001)), 1);
+    }
+
+    #[test]
+    fn l5_follows_scaling() {
+        use dolby_vision::rpu::extension_metadata::blocks::level5::ExtMetadataBlockLevel5;
+        use dolby_vision::rpu::generate::GenerateConfig;
+        let cfg = GenerateConfig {
+            length: 1,
+            level5: ExtMetadataBlockLevel5::from_offsets(0, 0, 280, 282),
+            ..Default::default()
+        };
+        let mut rpus = vec![DoviRpu::profile81_config(&cfg).unwrap()];
+        assert_eq!(scale_l5(&mut rpus, (0.5, 0.5)).unwrap(), 1);
+        let enc = rpus[0].write_hevc_unspec62_nalu().unwrap();
+        let back = DoviRpu::parse_unspec62_nalu(&enc).unwrap();
+        let l5 = back.vdr_dm_data.as_ref().and_then(|d| d.get_block(5)).cloned();
+        match l5 {
+            Some(dolby_vision::rpu::extension_metadata::blocks::ExtMetadataBlock::Level5(b)) => {
+                assert_eq!((b.active_area_top_offset, b.active_area_bottom_offset), (140, 141));
+            }
+            _ => panic!("brak L5"),
+        }
     }
 
     #[test]

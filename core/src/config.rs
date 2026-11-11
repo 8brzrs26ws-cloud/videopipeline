@@ -207,6 +207,8 @@ pub struct Opts {
     /// Stara ścieżka DV/HDR10+: plik tymczasowy wideo, dovi_tool / hdr10plus_tool, mkvmerge.
     /// Domyślnie metadane są wstrzykiwane w locie (bez plików pośrednich).
     pub legacy_inject: bool,
+    /// Zmniejszenie obrazu do 1920×1080 (z zachowaniem proporcji; mniejsze źródła bez zmian).
+    pub scale_1080: bool,
     pub shutdown: bool,
     pub output_dir: PathBuf,
     /// Kontener pliku wynikowego (auto = jak źródło).
@@ -333,7 +335,7 @@ impl Opts {
     }
 
     fn paths(&self, stem: &str, container: Container) -> Paths {
-        let cqt = format!("{}{}", self.engine.file_tag(), self.cq_tag());
+        let cqt = format!("{}{}{}", self.engine.file_tag(), self.cq_tag(), if self.scale_1080 { "_1080p" } else { "" });
         let d = &self.output_dir;
         let mut suffix = match self.codec {
             Codec::Hevc => format!("_hevc{cqt}"),

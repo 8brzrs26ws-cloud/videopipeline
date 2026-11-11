@@ -183,6 +183,13 @@ pub fn video_fps(path: &Path) -> Option<String> {
     (s != "0/0").then_some(s)
 }
 
+/// Wymiary pierwszego strumienia wideo (w pikselach kodowanych).
+pub fn video_size(path: &Path) -> Option<(u32, u32)> {
+    let s = probe_value(path, &["-select_streams", "v:0", "-show_entries", "stream=width,height"])?;
+    let mut it = s.lines().filter_map(|l| l.trim().parse::<u32>().ok());
+    Some((it.next()?, it.next()?)).filter(|(w, h)| *w > 0 && *h > 0)
+}
+
 pub fn container_duration(path: &Path) -> Option<f64> {
     probe_value(path, &["-show_entries", "format=duration"])?.parse().ok()
 }

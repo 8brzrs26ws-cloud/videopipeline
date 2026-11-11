@@ -27,7 +27,8 @@ const OPTION_HELP: [&str; OPTION_COUNT] = [
     "Jakość AV1: NVENC -cq, QSV ICQ, VAAPI QP×5; mniej = lepsza jakość. ←/→ ±1, PgUp/PgDn ±5.",
     "Jakość AVC (H.264, 8-bit High, tylko SDR): NVENC -cq, QSV ICQ, VAAPI QP; mniej = lepiej.",
     "Tylko Intel QSV: ← szybciej, → wolniej i nieco lepiej. veryslow bywa kilka razy wolniejszy od slow.",
-    "", // wiersz 4: kontener — opis zależny od wyboru (ostrzeżenie dla MP4)
+    "", // wiersz 5: kontener — opis zależny od wyboru (ostrzeżenie dla MP4)
+    "Do 1920×1080, proporcje zachowane (4K → 1080p); mniejsze źródła bez zmian.",
     "Pierwsza polska ścieżka przekodowana do E-AC-3 2.0 192 kb/s.",
     "Bez tego: tylko polska ścieżka audio i brak napisów.",
     "NVIDIA: bilateral_cuda, Intel: vpp_qsv/denoise_vaapi, zapasowo hqdn3d (CPU); tylko SDR 8-bit.",
@@ -521,6 +522,9 @@ fn summary(o: &Opts) -> String {
     if o.legacy_inject {
         parts.push("DV/HDR10+ przez pliki tymczasowe".into());
     }
+    if o.scale_1080 {
+        parts.push("1080p".into());
+    }
     if o.copy {
         parts.push("kopia → encoded".into());
     }
@@ -740,7 +744,7 @@ fn render_fkeys(f: &mut Frame, area: Rect) {
 // --------------------------------------------------------------- okienka ---
 
 fn render_options(f: &mut Frame, area: Rect, app: &App) {
-    let rect = centered(area, 78, 23);
+    let rect = centered(area, 78, 24);
     f.render_widget(Clear, rect);
     let block = dialog_block("Opcje videopipeline", BOX_QUEUE);
     let inner = block.inner(rect);
@@ -774,6 +778,7 @@ fn render_options(f: &mut Frame, area: Rect, app: &App) {
             },
         ),
         ("Kontener wyjściowy   (--container)".into(), format!("< {} >", o.container.label())),
+        (format!("{} Skaluj do 1080p   (--1080p)", chk(o.scale_1080)), String::new()),
         (format!("{} Audio PL → E-AC-3 stereo 192k   (-pleac3)", chk(o.pl_eac3)), String::new()),
         (format!("{} Dodatkowo audio EN + napisy EN i PL   (-da)", chk(o.extra)), String::new()),
         (format!("{} Odszumianie SDR 8-bit   (-d)", chk(o.denoise)), String::new()),

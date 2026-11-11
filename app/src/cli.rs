@@ -40,6 +40,9 @@ fn summary(o: &Opts) -> String {
     if o.legacy_inject {
         p.push("DV/HDR10+ przez pliki tymczasowe");
     }
+    if o.scale_1080 {
+        p.push("skalowanie do 1080p");
+    }
     if o.copy {
         p.push("kopia → encoded");
     }

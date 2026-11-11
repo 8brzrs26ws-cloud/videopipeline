@@ -156,6 +156,10 @@ fn build_args_nvenc(
     let mut fmt: Vec<String> = vec![];
     let mut filt: Vec<String> = vec![];
     let note;
+    // Kadrowanie i skalowanie na CPU: NVENC i tak dostaje klatki z pamięci (dekodowanie CUDA bez
+    // -hwaccel_output_format). Skalowanie przed odszumianiem / mapowaniem tonów — mniej pikseli dalej.
+    let scale = scale_target(opts, a);
+    let pre: Vec<String> = a.crop.iter().cloned().chain(scale.as_ref().map(|s| s.cpu())).collect();
 
     // AVC jest zawsze 8-bit SDR (źródła HDR odrzuca analiza; 10-bit SDR jest przeliczane do 8 bitów).
     let avc = opts.codec == Codec::Avc;
@@ -171,10 +175,7 @@ fn build_args_nvenc(
         fmt.extend(sdr_tags(c, tonemap));
 
         if opts.denoise && c.is_sdr_8bit && rt.denoise != Denoise::Off {
-            let mut chain: Vec<String> = vec![];
-            if let Some(cr) = &a.crop {
-                chain.push(cr.clone());
-            }
+            let mut chain: Vec<String> = pre.clone();
             if rt.denoise == Denoise::Cuda {
                 chain.push(format!(
                     "format=yuv420p,hwupload_cuda,{DENOISE_CUDA_FILTER},hwdownload,format=yuv420p"
@@ -187,7 +188,7 @@ fn build_args_nvenc(
             }
             filt = vec!["-vf".into(), chain.join(",")];
         } else if tonemap {
-            let mut chain: Vec<String> = a.crop.iter().cloned().collect();
+            let mut chain: Vec<String> = pre.clone();
             if rt.tonemap == Tonemap::OpenCl {
                 hw = sv(&["-init_hw_device", "opencl=ocl", "-filter_hw_device", "ocl"]);
                 chain.push(TONEMAP_OPENCL.into());
@@ -198,8 +199,8 @@ fn build_args_nvenc(
             }
             filt = vec!["-vf".into(), chain.join(",")];
         } else {
-            if let Some(cr) = &a.crop {
-                filt = vec!["-vf".into(), cr.clone()];
+            if !pre.is_empty() {
+                filt = vec!["-vf".into(), pre.join(",")];
             }
             note = match opts.codec {
                 Codec::Av1 => "SDR 8-bit -> AV1 10-bit (highbitdepth)",
@@ -214,8 +215,8 @@ fn build_args_nvenc(
         }
         fmt.extend(sv(&["-pix_fmt", "p010le", "-color_primaries", "bt2020"]));
         fmt.extend(sv(&["-color_trc", "smpte2084", "-colorspace", "bt2020nc"]));
-        if let Some(cr) = &a.crop {
-            filt = vec!["-vf".into(), cr.clone()];
+        if !pre.is_empty() {
+            filt = vec!["-vf".into(), pre.join(",")];
         }
         note = if opts.denoise {
             "HDR — denoise pominięty (tylko SDR 8-bit)"
@@ -258,9 +259,51 @@ fn build_args_nvenc(
     v.extend(scope_v(enc));
     v.extend(scope_v(fmt));
     v.extend(out.tail.iter().cloned());
-    (v, note.to_string())
+    let note = match &scale {
+        Some(s) => format!("{note} · skalowanie {}x{} → {}x{}", s.src.0, s.src.1, s.dst.0, s.dst.1),
+        None => note.to_string(),
+    };
+    (v, note)
 }
 
+
+/// Skalowanie do 1080p: (szerokość, wysokość) po kadrowaniu i docelowe — tylko gdy obraz jest
+/// większy niż 1920×1080. Proporcje zachowane, wymiary parzyste (4:2:0).
+pub(crate) struct Scale {
+    pub src: (u32, u32),
+    pub dst: (u32, u32),
+}
+
+impl Scale {
+    /// Filtr CPU (swscale, Lanczos) — po crop, przed odszumianiem i mapowaniem tonów.
+    fn cpu(&self) -> String {
+        format!("scale={}:{}:flags=lanczos", self.dst.0, self.dst.1)
+    }
+    /// Współczynniki dla przesunięć obszaru aktywnego (L5) w RPU Dolby Vision.
+    pub fn factors(&self) -> (f64, f64) {
+        (self.dst.0 as f64 / self.src.0 as f64, self.dst.1 as f64 / self.src.1 as f64)
+    }
+}
+
+fn fit_1080(w: u32, h: u32) -> Option<(u32, u32)> {
+    if w <= 1920 && h <= 1080 {
+        return None;
+    }
+    let f = (1920.0 / w as f64).min(1080.0 / h as f64);
+    let even = |x: f64| (((x / 2.0).round() as u32) * 2).max(2);
+    Some((even(w as f64 * f), even(h as f64 * f)))
+}
+
+pub(crate) fn scale_target(opts: &Opts, a: &Analysis) -> Option<Scale> {
+    if !opts.scale_1080 {
+        return None;
+    }
+    let src = match a.crop.as_deref().and_then(parse_crop) {
+        Some((w, h, _, _)) => (w, h),
+        None => probe::video_size(&a.input_file)?,
+    };
+    fit_1080(src.0, src.1).map(|dst| Scale { src, dst })
+}
 
 /// "crop=W:H:X:Y" → (W, H, X, Y)
 fn parse_crop(s: &str) -> Option<(u32, u32, u32, u32)> {
@@ -299,6 +342,7 @@ fn build_args_intel(
     // AV1 zawsze 10-bit (jak -highbitdepth w NVENC); HEVC 10-bit tylko dla źródeł HDR/10-bit.
     let ten_bit = (!c.is_sdr_8bit || opts.codec == Codec::Av1) && opts.codec != Codec::Avc;
     let crop = a.crop.as_deref().and_then(parse_crop);
+    let scale = scale_target(opts, a);
     let denoise = opts.denoise && c.is_sdr_8bit && rt.denoise != Denoise::Off;
     // AVC ze źródła HDR: mapowanie tonów (sprzętowe Intel albo CPU — wtedy klatki przez pamięć).
     let tonemap = opts.codec == Codec::Avc && c.is_hdr();
@@ -316,6 +360,9 @@ fn build_args_intel(
     }];
     if opts.codec == Codec::Av1 && c.is_sdr_8bit {
         notes.push("→ AV1 10-bit".into());
+    }
+    if let Some(s) = &scale {
+        notes.push(format!("skalowanie {}x{} → {}x{}", s.src.0, s.src.1, s.dst.0, s.dst.1));
     }
     let decoder;
     let enc: Vec<String>;
@@ -351,6 +398,9 @@ fn build_args_intel(
                 if let Some(cr) = &a.crop {
                     chain.push(cr.clone());
                 }
+                if let Some(s) = &scale {
+                    chain.push(s.cpu());
+                }
                 if cpu_tonemap {
                     chain.push(TONEMAP_CPU.into());
                 }
@@ -365,6 +415,9 @@ fn build_args_intel(
                 let mut vpp: Vec<String> = vec![];
                 if let Some((w, h, x, y)) = crop {
                     vpp.push(format!("cw={w}:ch={h}:cx={x}:cy={y}"));
+                }
+                if let Some(s) = &scale {
+                    vpp.push(format!("w={}:h={}", s.dst.0, s.dst.1));
                 }
                 if denoise && rt.denoise == Denoise::Intel {
                     vpp.push(format!("denoise={DENOISE_QSV_LEVEL}"));
@@ -413,6 +466,9 @@ fn build_args_intel(
                 if let Some(cr) = &a.crop {
                     chain.push(cr.clone());
                 }
+                if let Some(s) = &scale {
+                    chain.push(s.cpu());
+                }
                 if cpu_denoise {
                     chain.push(DENOISE_CPU_FILTER.into());
                     notes.push("denoise CPU".into());
@@ -431,10 +487,14 @@ fn build_args_intel(
                 // Klatki z dekodera VAAPI przechodzą bez kopiowania; po dekodowaniu programowym — hwupload.
                 chain.push("format=nv12|p010le|vaapi".into());
                 chain.push("hwupload".into());
+                let size = scale.as_ref().map(|s| format!("w={}:h={}:", s.dst.0, s.dst.1)).unwrap_or_default();
                 if tonemap {
                     chain.push(TONEMAP_VAAPI.into());
+                    if !size.is_empty() {
+                        chain.push(format!("scale_vaapi={size}format=nv12"));
+                    }
                 } else {
-                    chain.push(format!("scale_vaapi=format={}", if ten_bit { "p010" } else { "nv12" }));
+                    chain.push(format!("scale_vaapi={size}format={}", if ten_bit { "p010" } else { "nv12" }));
                 }
             }
             if denoise && rt.denoise == Denoise::Intel {
@@ -625,8 +685,9 @@ fn start_live(
     let json = (a.has_hdr10plus && !opts.no_hdr10plus).then(|| p.temp_hdr10plus.clone());
     // Wynik kodera ma zawsze znaczniki PQ (smpte2084) — zgodność warstwy bazowej DV jak dla HDR10.
     let info = crate::inject::StreamInfo { fps, hlg: false };
+    let l5 = scale_target(opts, a).map(|s| s.factors());
     let thread = thread::spawn(move || {
-        let meta = crate::inject::Metadata::load(rpu.as_deref(), json.as_deref())?;
+        let meta = crate::inject::Metadata::load(rpu.as_deref(), json.as_deref(), l5)?;
         let out = std::io::BufWriter::with_capacity(1 << 20, mux_in);
         let mut stats = crate::inject::run(enc_out, out, &meta, info)?;
         stats.converted_p7 = meta.converted_p7;
@@ -826,5 +887,21 @@ pub fn run_stage(opts: &Opts, rt: &Runtime, files: &[Analysis], panel: &Panel) {
         if !running.is_empty() {
             thread::sleep(Duration::from_millis(500));
         }
+    }
+}
+
+#[cfg(test)]
+mod scale_tests {
+    use super::fit_1080;
+
+    #[test]
+    fn fits_into_1080p() {
+        assert_eq!(fit_1080(3840, 2160), Some((1920, 1080)));
+        assert_eq!(fit_1080(3840, 1600), Some((1920, 800)));
+        assert_eq!(fit_1080(3832, 1600), Some((1920, 802)));
+        assert_eq!(fit_1080(2880, 2160), Some((1440, 1080)));
+        assert_eq!(fit_1080(4096, 1716), Some((1920, 804)));
+        assert_eq!(fit_1080(1920, 1080), None);
+        assert_eq!(fit_1080(1280, 720), None);
     }
 }

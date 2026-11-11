@@ -182,7 +182,7 @@ pub struct RenameCtx {
     pub input: TextInput,
 }
 
-pub const OPTION_COUNT: usize = 16;
+pub const OPTION_COUNT: usize = 17;
 /// Indeksy wierszy w oknie opcji (F7).
 pub const OPT_HEVC_CQ: usize = 1;
 pub const OPT_AV1_CQ: usize = 2;
@@ -1269,16 +1269,17 @@ impl App {
                 self.opts.qsv_preset = QSV_PRESETS[(i + 1) % QSV_PRESETS.len()];
             }
             OPT_CONTAINER => self.cycle_container(1),
-            6 => self.opts.pl_eac3 = !self.opts.pl_eac3,
-            7 => self.opts.extra = !self.opts.extra,
-            8 => self.opts.denoise = !self.opts.denoise,
-            9 => self.opts.no_crop = !self.opts.no_crop,
-            10 => self.opts.no_dv = !self.opts.no_dv,
-            11 => self.opts.no_hdr10plus = !self.opts.no_hdr10plus,
-            12 => self.opts.legacy_inject = !self.opts.legacy_inject,
-            13 => self.opts.copy = !self.opts.copy,
-            14 => self.opts.shutdown = !self.opts.shutdown,
-            15 => self.opt_edit = Some(self.opts.output_dir.to_string_lossy().to_string()),
+            6 => self.opts.scale_1080 = !self.opts.scale_1080,
+            7 => self.opts.pl_eac3 = !self.opts.pl_eac3,
+            8 => self.opts.extra = !self.opts.extra,
+            9 => self.opts.denoise = !self.opts.denoise,
+            10 => self.opts.no_crop = !self.opts.no_crop,
+            11 => self.opts.no_dv = !self.opts.no_dv,
+            12 => self.opts.no_hdr10plus = !self.opts.no_hdr10plus,
+            13 => self.opts.legacy_inject = !self.opts.legacy_inject,
+            14 => self.opts.copy = !self.opts.copy,
+            15 => self.opts.shutdown = !self.opts.shutdown,
+            16 => self.opt_edit = Some(self.opts.output_dir.to_string_lossy().to_string()),
             _ => {}
         }
     }
