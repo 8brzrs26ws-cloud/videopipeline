@@ -1213,7 +1213,10 @@ fn run_lines(
         l1.push(pct_span(r.2));
         out.push(Line::from(l1));
 
-        let mut l2 = vec![Span::styled(pad(engine, 6), fg(DIM))];
+        // Postęp kodowania wideo tego pliku (pozycja w filmie) — nie mylić z obciążeniem kodera
+        // karty (wiersz „NVENC” w sekcji obciążenia, z nvidia-smi).
+        let _ = engine;
+        let mut l2 = vec![Span::styled("WIDEO ", fg(DIM))];
         l2.extend(meter(e.pct, mw));
         l2.push(pct_span(e.pct));
         out.push(Line::from(l2));
