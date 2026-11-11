@@ -27,7 +27,9 @@ case "$ID_ALL" in
     *" debian "*|*" ubuntu "*)
         $SUDO apt-get update
         # docker.io + buildx z repozytoriów dystrybucji (Debian 13 / Ubuntu 24.04+); gh w Debianie 13 jest w repo.
-        $SUDO apt-get install -y --no-install-recommends docker.io docker-buildx git gh ca-certificates
+        # Debian 13: klient (polecenie docker) jest w osobnym pakiecie docker-cli; starsze wydania go nie mają.
+        CLI=""; apt-cache show docker-cli >/dev/null 2>&1 && CLI="docker-cli"
+        $SUDO apt-get install -y --no-install-recommends docker.io $CLI docker-buildx git gh ca-certificates
         [[ $DEV = 1 ]] && $SUDO apt-get install -y --no-install-recommends build-essential curl pkg-config \
             ffmpeg mkvtoolnix mediainfo mpv
         ;;
