@@ -3,7 +3,7 @@
 # Bierze tylko pliki z numerem wersji z tagu (starsze buildy leżące w dist/ są pomijane),
 # a tag musi zgadzać się z wersją w app/Cargo.toml.
 # Wymaga zalogowanego `gh` (gh auth login). Istniejące wydanie dostaje pliki podmienione (--clobber),
-# a pliki innych wersji są z niego usuwane.
+# a pliki innych wersji są z niego usuwane. Opis wydania z docs/release-notes/<tag>.md, jeśli istnieje.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 TAG="${1:?podaj tag, np. ./release.sh v0.17.0}"
@@ -19,10 +19,15 @@ FILES=(dist/VideoPipeline-"$VER"-*.AppImage dist/VideoPipeline-"$VER"-*.AppImage
 [[ ${#FILES[@]} -gt 0 ]] || { echo "BŁĄD: brak plików wersji $VER w dist/ — najpierw ./build-local.sh" >&2; exit 1; }
 printf 'Wysyłam:\n'; printf '  %s\n' "${FILES[@]}"
 
+# Opis wydania: docs/release-notes/<tag>.md (lista zmian po polsku); bez niego — notatki generowane przez GitHub.
+NOTES="docs/release-notes/$TAG.md"
+if [[ -f "$NOTES" ]]; then NOTE_ARGS=(--notes-file "$NOTES"); else NOTE_ARGS=(--generate-notes); fi
+
 if gh release view "$TAG" >/dev/null 2>&1; then
     gh release upload "$TAG" "${FILES[@]}" --clobber
+    [[ -f "$NOTES" ]] && gh release edit "$TAG" --notes-file "$NOTES"
 else
-    gh release create "$TAG" "${FILES[@]}" --title "VideoPipeline $VER" --generate-notes
+    gh release create "$TAG" "${FILES[@]}" --title "VideoPipeline $VER" "${NOTE_ARGS[@]}"
 fi
 # Wydanie ma zawierać tylko pliki tej wersji — usuń pozostałości innych (np. po zmianie tagu wydania).
 while read -r asset; do
