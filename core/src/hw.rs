@@ -271,7 +271,7 @@ pub fn detect_report() -> (HwInfo, Vec<TestReport>, Vec<(String, bool, String, S
         if cfg!(windows) && e == Engine::Vaapi {
             continue;
         }
-        for c in [Codec::Hevc, Codec::Av1] {
+        for c in Codec::ALL {
             let enc = e.encoder(c);
             if !encoders.iter().any(|x| x == enc) {
                 jobs.push((e, c, None));
@@ -342,7 +342,7 @@ pub fn detect() -> HwInfo {
         if cfg!(windows) && e == Engine::Vaapi {
             continue;
         }
-        for c in [Codec::Hevc, Codec::Av1] {
+        for c in Codec::ALL {
             if !encoders.iter().any(|x| x == e.encoder(c)) {
                 continue;
             }

@@ -94,15 +94,19 @@ fn build_args_nvenc(
     let mut filt: Vec<String> = vec![];
     let note;
 
-    if c.is_sdr_8bit {
-        if opts.codec == Codec::Hevc {
-            fmt.extend(sv(&["-profile:v", "main"]));
+    // AVC jest zawsze 8-bit SDR (źródła HDR odrzuca analiza; 10-bit SDR jest przeliczane do 8 bitów).
+    let avc = opts.codec == Codec::Avc;
+    if c.is_sdr_8bit || avc {
+        match opts.codec {
+            Codec::Hevc => fmt.extend(sv(&["-profile:v", "main"])),
+            Codec::Avc => fmt.extend(sv(&["-profile:v", "high"])),
+            Codec::Av1 => {}
         }
         fmt.extend(sv(&["-pix_fmt", "yuv420p"]));
         fmt.extend(sv(&["-color_primaries", &c.sdr_primaries, "-color_trc", &c.sdr_trc]));
         fmt.extend(sv(&["-colorspace", &c.sdr_space, "-color_range", &c.sdr_range]));
 
-        if opts.denoise && rt.denoise != Denoise::Off {
+        if opts.denoise && c.is_sdr_8bit && rt.denoise != Denoise::Off {
             let mut chain: Vec<String> = vec![];
             if let Some(cr) = &a.crop {
                 chain.push(cr.clone());
@@ -122,10 +126,11 @@ fn build_args_nvenc(
             if let Some(cr) = &a.crop {
                 filt = vec!["-vf".into(), cr.clone()];
             }
-            note = if opts.codec == Codec::Av1 {
-                "SDR 8-bit -> AV1 10-bit (highbitdepth)"
-            } else {
-                "SDR 8-bit"
+            note = match opts.codec {
+                Codec::Av1 => "SDR 8-bit -> AV1 10-bit (highbitdepth)",
+                Codec::Avc if !c.is_sdr_8bit => "SDR 10-bit -> AVC 8-bit (High)",
+                Codec::Avc => "SDR 8-bit -> AVC High",
+                Codec::Hevc => "SDR 8-bit",
             };
         }
     } else {
@@ -156,6 +161,13 @@ fn build_args_nvenc(
             "-c:v", "hevc_nvenc", "-preset", "p7", "-tune", "hq", "-rc", "vbr", "-cq",
             &cq, "-b:v", "0", "-spatial-aq", "1", "-temporal-aq", "1", "-b_ref_mode",
             "middle", "-multipass", "2", "-rc-lookahead", "32",
+        ]),
+        // AVC: te same priorytety jakości co HEVC (p7/hq, VBR CQ, AQ, B-klatki referencyjne,
+        // pełne multipass, lookahead) + CABAC.
+        Codec::Avc => sv(&[
+            "-c:v", "h264_nvenc", "-preset", "p7", "-tune", "hq", "-rc", "vbr", "-cq", &cq,
+            "-b:v", "0", "-spatial-aq", "1", "-temporal-aq", "1", "-bf", "3", "-b_ref_mode",
+            "middle", "-multipass", "fullres", "-rc-lookahead", "32", "-coder", "cabac",
         ]),
     };
 
@@ -210,7 +222,7 @@ fn build_args_intel(
     let c = &a.color;
     let dev = rt.intel_dev.as_ref().map(|d| d.to_string_lossy().to_string()).unwrap_or_default();
     // AV1 zawsze 10-bit (jak -highbitdepth w NVENC); HEVC 10-bit tylko dla źródeł HDR/10-bit.
-    let ten_bit = !c.is_sdr_8bit || opts.codec == Codec::Av1;
+    let ten_bit = (!c.is_sdr_8bit || opts.codec == Codec::Av1) && opts.codec != Codec::Avc;
     let crop = a.crop.as_deref().and_then(parse_crop);
     let denoise = opts.denoise && c.is_sdr_8bit && rt.denoise != Denoise::Off;
     let cq = opts.cq() as u32;
@@ -218,7 +230,11 @@ fn build_args_intel(
     let mut v = sv(&["-hide_banner", "-nostats", "-progress"]);
     v.push(pf.to_string_lossy().into());
 
-    let mut notes: Vec<String> = vec![if c.is_sdr_8bit { "SDR 8-bit".into() } else { "HDR 10-bit".into() }];
+    let mut notes: Vec<String> = vec![match (c.is_sdr_8bit, opts.codec) {
+        (true, _) => "SDR 8-bit".into(),
+        (false, Codec::Avc) => "SDR 10-bit → AVC 8-bit".into(),
+        (false, _) => "HDR 10-bit".into(),
+    }];
     if opts.codec == Codec::Av1 && c.is_sdr_8bit {
         notes.push("→ AV1 10-bit".into());
     }
@@ -283,6 +299,10 @@ fn build_args_intel(
                     "-c:v", "av1_qsv", "-preset", opts.qsv_preset, "-global_quality", &cq.to_string(),
                     "-profile:v", "main",
                 ]),
+                Codec::Avc => sv(&[
+                    "-c:v", "h264_qsv", "-preset", opts.qsv_preset, "-global_quality", &cq.to_string(),
+                    "-profile:v", "high",
+                ]),
             };
             notes.push(format!("ICQ {cq}"));
         }
@@ -334,6 +354,9 @@ fn build_args_intel(
                     "-c:v", "av1_vaapi", "-rc_mode", "CQP", "-qp", &(cq * 5).min(255).to_string(),
                     "-profile:v", "main",
                 ]),
+                Codec::Avc => sv(&[
+                    "-c:v", "h264_vaapi", "-rc_mode", "CQP", "-qp", &cq.to_string(), "-profile:v", "high",
+                ]),
             };
             notes.push(format!("CQP {cq}"));
         }
@@ -341,7 +364,7 @@ fn build_args_intel(
 
     v.extend(out.streams.iter().cloned());
     v.extend(scope_v(enc));
-    let color = if c.is_sdr_8bit {
+    let color = if c.is_sdr_8bit || opts.codec == Codec::Avc {
         sv(&[
             "-color_primaries", &c.sdr_primaries, "-color_trc", &c.sdr_trc,
             "-colorspace", &c.sdr_space, "-color_range", &c.sdr_range,

@@ -65,6 +65,8 @@ fn preflight_nvenc(opts: &Opts, rt: &mut Runtime) -> Result<()> {
             opts.av1_cq
         );
         plog!("AV1 SDR 8-bit: wyjście AV1 10-bit przez -highbitdepth 1.");
+    } else if opts.codec == Codec::Avc {
+        plog!("Kodek wideo: AVC NVENC — profil High 8-bit, preset p7, VBR CQ {}, multipass fullres.", opts.avc_cq);
     } else {
         plog!("Kodek wideo: HEVC NVENC — CQ {}.", opts.hevc_cq);
     }
@@ -141,6 +143,9 @@ pub fn run(opts: &Opts) -> Result<Runtime> {
     }
     if opts.codec == Codec::Av1 {
         plog!("UWAGA: tryb AV1 nie wstrzykuje Dolby Vision ani HDR10+.");
+    }
+    if opts.codec == Codec::Avc {
+        plog!("AVC: 8-bit, tylko źródła SDR (pliki HDR są pomijane z komunikatem); bez Dolby Vision i HDR10+.");
     }
 
     if opts.pl_eac3 {

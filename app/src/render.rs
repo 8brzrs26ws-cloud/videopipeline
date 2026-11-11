@@ -25,6 +25,7 @@ const OPTION_HELP: [&str; OPTION_COUNT] = [
     "", // wiersz 0: opis budowany dynamicznie (wykryte enkodery)
     "Jakość HEVC: NVENC -cq, QSV ICQ, VAAPI QP; mniej = lepsza jakość. ←/→ ±1, PgUp/PgDn ±5.",
     "Jakość AV1: NVENC -cq, QSV ICQ, VAAPI QP×5; mniej = lepsza jakość. ←/→ ±1, PgUp/PgDn ±5.",
+    "Jakość AVC (H.264, 8-bit High, tylko SDR): NVENC -cq, QSV ICQ, VAAPI QP; mniej = lepiej.",
     "Tylko Intel QSV: ← szybciej, → wolniej i nieco lepiej. veryslow bywa kilka razy wolniejszy od slow.",
     "", // wiersz 4: kontener — opis zależny od wyboru (ostrzeżenie dla MP4)
     "Pierwsza polska ścieżka przekodowana do E-AC-3 2.0 192 kb/s.",
@@ -735,7 +736,7 @@ fn render_fkeys(f: &mut Frame, area: Rect) {
 // --------------------------------------------------------------- okienka ---
 
 fn render_options(f: &mut Frame, area: Rect, app: &App) {
-    let rect = centered(area, 78, 22);
+    let rect = centered(area, 78, 23);
     f.render_widget(Clear, rect);
     let block = dialog_block("Opcje videopipeline", BOX_QUEUE);
     let inner = block.inner(rect);
@@ -759,6 +760,7 @@ fn render_options(f: &mut Frame, area: Rect, app: &App) {
         ),
         ("Jakość HEVC — CQ   (--hevc-cq)".into(), format!("< {} >", o.hevc_cq)),
         ("Jakość AV1 — CQ   (--av1-cq)".into(), format!("< {} >", o.av1_cq)),
+        ("Jakość AVC — CQ   (--avc-cq)".into(), format!("< {} >", o.avc_cq)),
         (
             "Preset Intel QSV   (--qsv-preset)".into(),
             if o.engine == Engine::Qsv {
@@ -788,7 +790,7 @@ fn render_options(f: &mut Frame, area: Rect, app: &App) {
     }
     lines.push(Line::default());
     let help = if app.opt_cursor == 0 {
-        format!("Wykryte: {}. HEVC: DV/HDR10+; AV1: 10-bit, bez DV/HDR10+.", app.hw.summary())
+        format!("Wykryte: {}. HEVC: DV/HDR10+; AV1: 10-bit; AVC: 8-bit, tylko SDR.", app.hw.summary())
     } else if app.opt_cursor == crate::app::OPT_CONTAINER {
         match o.container {
             ContainerChoice::Auto => "Jak źródło: .mp4 → MP4, reszta → MKV. Pełne DV i HDR10+ tylko w MKV.".into(),

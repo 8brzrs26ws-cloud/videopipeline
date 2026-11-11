@@ -41,8 +41,11 @@ struct Cli {
     #[arg(short = 'c', long)]
     copy: bool,
     /// Koduj do AV1 zamiast HEVC
-    #[arg(long)]
+    #[arg(long, conflicts_with = "avc")]
     av1: bool,
+    /// Koduj do AVC (H.264, 8-bit, tylko źródła SDR) zamiast HEVC
+    #[arg(long)]
+    avc: bool,
     /// Koduj na karcie Intel (QSV, zapasowo VAAPI). Bez NVIDII w systemie Intel jest wybierany sam
     #[arg(long)]
     intel: bool,
@@ -75,7 +78,10 @@ struct Cli {
     /// Jakość AV1 — CQ (mniej = lepiej; domyślnie 25)
     #[arg(long = "av1-cq", value_parser = clap::value_parser!(u8).range(1..=51))]
     av1_cq: Option<u8>,
-    /// Jakość dla wybranego kodeka (skrót: ustawia --hevc-cq albo --av1-cq zależnie od --av1)
+    /// Jakość AVC — CQ (mniej = lepiej; domyślnie 18)
+    #[arg(long = "avc-cq", value_parser = clap::value_parser!(u8).range(1..=51))]
+    avc_cq: Option<u8>,
+    /// Jakość dla wybranego kodeka (skrót: ustawia --hevc-cq, --av1-cq albo --avc-cq)
     #[arg(short = 'q', long = "cq", value_parser = clap::value_parser!(u8).range(1..=51))]
     cq: Option<u8>,
     /// Pomiń cropdetect (-pc)
@@ -203,6 +209,7 @@ fn real_main() -> Result<i32> {
     // Zachowujemy składnię V9: -av1 / -pleac3 / -da (+ nowe -nocrop / -nodv / -nohdr10plus).
     let args = std::env::args().map(|a| match a.as_str() {
         "-av1" => "--av1".to_string(),
+        "-avc" | "-h264" => "--avc".to_string(),
         "-pleac3" => "--pleac3".to_string(),
         "-da" => "--da".to_string(),
         "-pc" | "-nocrop" => "--no-crop".to_string(),
@@ -216,7 +223,13 @@ fn real_main() -> Result<i32> {
         _ => a,
     });
     let cli = Cli::parse_from(args);
-    let codec = if cli.av1 { Codec::Av1 } else { Codec::Hevc };
+    let codec = if cli.av1 {
+        Codec::Av1
+    } else if cli.avc {
+        Codec::Avc
+    } else {
+        Codec::Hevc
+    };
     let script = !cli.tui && (!cli.paths.is_empty() || cli.batch);
 
     if cli.mediainfo {
@@ -274,8 +287,9 @@ fn real_main() -> Result<i32> {
     let opts = Opts {
         codec,
         engine: *picked.as_ref().unwrap_or(&Engine::Nvenc),
-        hevc_cq: cli.hevc_cq.or(if cli.av1 { None } else { cli.cq }).unwrap_or(DEFAULT_HEVC_CQ),
-        av1_cq: cli.av1_cq.or(if cli.av1 { cli.cq } else { None }).unwrap_or(DEFAULT_AV1_CQ),
+        hevc_cq: cli.hevc_cq.or(if codec == Codec::Hevc { cli.cq } else { None }).unwrap_or(DEFAULT_HEVC_CQ),
+        av1_cq: cli.av1_cq.or(if codec == Codec::Av1 { cli.cq } else { None }).unwrap_or(DEFAULT_AV1_CQ),
+        avc_cq: cli.avc_cq.or(if codec == Codec::Avc { cli.cq } else { None }).unwrap_or(DEFAULT_AVC_CQ),
         qsv_preset: cli
             .qsv_preset
             .as_deref()

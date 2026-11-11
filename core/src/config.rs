@@ -7,13 +7,19 @@ use std::{
 pub enum Codec {
     Hevc,
     Av1,
+    /// H.264 / AVC — 8-bit, profil High; tylko źródła SDR (największa zgodność z odtwarzaczami).
+    Avc,
 }
 
 impl Codec {
+    pub const ALL: [Codec; 3] = [Codec::Hevc, Codec::Av1, Codec::Avc];
+
+    /// Nazwa kodeka jak w ffprobe (codec_name).
     pub fn name(self) -> &'static str {
         match self {
             Codec::Hevc => "hevc",
             Codec::Av1 => "av1",
+            Codec::Avc => "h264",
         }
     }
 
@@ -21,6 +27,7 @@ impl Codec {
         match self {
             Codec::Hevc => "HEVC",
             Codec::Av1 => "AV1",
+            Codec::Avc => "AVC",
         }
     }
 }
@@ -65,6 +72,9 @@ impl Engine {
             (Engine::Qsv, Codec::Av1) => "av1_qsv",
             (Engine::Vaapi, Codec::Hevc) => "hevc_vaapi",
             (Engine::Vaapi, Codec::Av1) => "av1_vaapi",
+            (Engine::Nvenc, Codec::Avc) => "h264_nvenc",
+            (Engine::Qsv, Codec::Avc) => "h264_qsv",
+            (Engine::Vaapi, Codec::Avc) => "h264_vaapi",
         }
     }
 
@@ -152,6 +162,8 @@ impl ContainerChoice {
 /// Uwaga: w skrypcie fish nazwy AV1 mówiły "cq23", ale faktyczny parametr to 25.
 pub const DEFAULT_HEVC_CQ: u8 = 19;
 pub const DEFAULT_AV1_CQ: u8 = 25;
+/// AVC potrzebuje niższego CQ niż HEVC do podobnej jakości obrazu (mniej wydajny kodek).
+pub const DEFAULT_AVC_CQ: u8 = 18;
 /// NVENC: 0 = automat, sensowny zakres to 1..=51.
 pub const CQ_MIN: u8 = 1;
 pub const CQ_MAX: u8 = 51;
@@ -177,6 +189,8 @@ pub struct Opts {
     pub hevc_cq: u8,
     /// Jakość AV1 (CQ)
     pub av1_cq: u8,
+    /// Jakość AVC (H.264) — CQ.
+    pub avc_cq: u8,
     /// Preset QSV (jeden z QSV_PRESETS); NVENC ma stały p7, VAAPI nie ma presetów.
     pub qsv_preset: &'static str,
     pub pl_eac3: bool,
@@ -249,6 +263,7 @@ impl Opts {
         match self.codec {
             Codec::Hevc => self.hevc_cq,
             Codec::Av1 => self.av1_cq,
+            Codec::Avc => self.avc_cq,
         }
     }
 
@@ -258,6 +273,7 @@ impl Opts {
         let def = match self.codec {
             Codec::Hevc => DEFAULT_HEVC_CQ,
             Codec::Av1 => DEFAULT_AV1_CQ,
+            Codec::Avc => DEFAULT_AVC_CQ,
         };
         if self.cq() == def {
             String::new()
@@ -271,7 +287,7 @@ impl Opts {
     /// gdy nie ma czego wstrzykiwać — brak Dolby Vision i HDR10+ albo ich analiza pominięta, oraz AV1
     /// (tam DV/HDR10+ i tak nie są przenoszone).
     pub fn direct_encode(&self, has_dovi: bool, has_hdr10plus: bool) -> bool {
-        self.codec == Codec::Av1 || !((has_dovi && !self.no_dv) || (has_hdr10plus && !self.no_hdr10plus))
+        self.codec != Codec::Hevc || !((has_dovi && !self.no_dv) || (has_hdr10plus && !self.no_hdr10plus))
     }
 
     pub fn paths_for(&self, input: &Path) -> Paths {
@@ -285,6 +301,7 @@ impl Opts {
         let mut suffix = match self.codec {
             Codec::Hevc => format!("_hevc{cqt}"),
             Codec::Av1 => format!("_{AV1_TAG}{cqt}"),
+            Codec::Avc => format!("_avc{cqt}"),
         };
         if self.pl_eac3 {
             suffix.push_str("_pleac3");
@@ -300,6 +317,10 @@ impl Opts {
             Codec::Av1 => (
                 d.join(format!("{stem}_encoded_{AV1_TAG}{cqt}.mkv")),
                 d.join(format!("{stem}.{AV1_TAG}.analysis.json")),
+            ),
+            Codec::Avc => (
+                d.join(format!("{stem}_encoded_avc{cqt}.mkv")),
+                d.join(format!("{stem}.avc.analysis.json")),
             ),
         };
         Paths {
@@ -328,7 +349,12 @@ impl Opts {
                 let n = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
                 match self.codec {
                     Codec::Av1 => n.ends_with(&av1_suffix),
-                    Codec::Hevc => n.ends_with(".analysis.json") && !n.ends_with(&av1_suffix),
+                    Codec::Avc => n.ends_with(".avc.analysis.json"),
+                    Codec::Hevc => {
+                        n.ends_with(".analysis.json")
+                            && !n.ends_with(&av1_suffix)
+                            && !n.ends_with(".avc.analysis.json")
+                    }
                 }
             })
             .collect();

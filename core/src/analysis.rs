@@ -300,8 +300,17 @@ pub fn analyze(opts: &Opts, input: &Path, panel: &mut Panel) -> Result<Analysis>
     let color = media.color.clone();
     let (mut has_dovi, mut has_hdr10plus) = (false, false);
 
+    if opts.codec == Codec::Avc && color.is_hdr() {
+        // AVC (8-bit) nie przeniesie HDR — bez mapowania tonów obraz byłby wyprany i z pasmami.
+        anyhow::bail!(
+            "AVC obsługuje tylko źródła SDR, a ten plik jest HDR ({}). Wybierz HEVC albo AV1 (F7 / --av1).",
+            if color.trc == "arib-std-b67" { "HLG" } else { "PQ / HDR10" }
+        );
+    }
     if color.is_sdr_8bit {
         panel.draw_analysis(&filename, 60.0, "SDR 8-BIT", "DV RPU i HDR10+ pominięte — źródło SDR 8-bit");
+    } else if opts.codec == Codec::Avc {
+        panel.draw_analysis(&filename, 60.0, "AVC", "DV RPU i HDR10+ pominięte — AVC 8-bit (SDR)");
     } else if opts.codec == Codec::Av1 {
         panel.draw_analysis(&filename, 60.0, "AV1 / HDR", "DV RPU i HDR10+ pominięte — to ścieżka HEVC");
     } else {

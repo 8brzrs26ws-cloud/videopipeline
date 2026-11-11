@@ -298,7 +298,7 @@ pub fn run(opts: &Opts, a: &Analysis, analysis_file: &Path, panel: &mut Panel) -
     plog!(" -> [{name}] Składanie pliku wynikowego ({})...", opts.codec.name());
 
     // --- wideo + dynamiczne HDR -------------------------------------------
-    let current_video: PathBuf = if opts.codec == Codec::Av1 {
+    let current_video: PathBuf = if opts.codec != Codec::Hevc {
         if !p.temp_video.exists() {
             bail!("brak pliku {}", p.temp_video.display());
         }

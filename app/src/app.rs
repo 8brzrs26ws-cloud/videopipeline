@@ -182,12 +182,13 @@ pub struct RenameCtx {
     pub input: TextInput,
 }
 
-pub const OPTION_COUNT: usize = 14;
+pub const OPTION_COUNT: usize = 15;
 /// Indeksy wierszy w oknie opcji (F7).
 pub const OPT_HEVC_CQ: usize = 1;
 pub const OPT_AV1_CQ: usize = 2;
-pub const OPT_QSV_PRESET: usize = 3;
-pub const OPT_CONTAINER: usize = 4;
+pub const OPT_AVC_CQ: usize = 3;
+pub const OPT_QSV_PRESET: usize = 4;
+pub const OPT_CONTAINER: usize = 5;
 
 pub struct RunCtx {
     pub status: SharedStatus,
@@ -1216,6 +1217,7 @@ impl App {
         match self.opt_cursor {
             OPT_HEVC_CQ => self.opts.hevc_cq = bump(self.opts.hevc_cq),
             OPT_AV1_CQ => self.opts.av1_cq = bump(self.opts.av1_cq),
+            OPT_AVC_CQ => self.opts.avc_cq = bump(self.opts.avc_cq),
             OPT_QSV_PRESET => self.cycle_preset(d.signum()),
             OPT_CONTAINER => self.cycle_container(d.signum()),
             0 => self.cycle_codec(if d < 0 { -1 } else { 1 }),
@@ -1228,10 +1230,9 @@ impl App {
         let combos = self.hw.combos();
         if combos.is_empty() {
             // Bez wykrytych enkoderów: przynajmniej przełącz kodek.
-            self.opts.codec = match self.opts.codec {
-                Codec::Hevc => Codec::Av1,
-                Codec::Av1 => Codec::Hevc,
-            };
+            let all = Codec::ALL;
+            let i = all.iter().position(|c| *c == self.opts.codec).unwrap_or(0) as i32;
+            self.opts.codec = all[(i + d).rem_euclid(all.len() as i32) as usize];
             return;
         }
         let n = combos.len() as i32;
@@ -1268,15 +1269,15 @@ impl App {
                 self.opts.qsv_preset = QSV_PRESETS[(i + 1) % QSV_PRESETS.len()];
             }
             OPT_CONTAINER => self.cycle_container(1),
-            5 => self.opts.pl_eac3 = !self.opts.pl_eac3,
-            6 => self.opts.extra = !self.opts.extra,
-            7 => self.opts.denoise = !self.opts.denoise,
-            8 => self.opts.no_crop = !self.opts.no_crop,
-            9 => self.opts.no_dv = !self.opts.no_dv,
-            10 => self.opts.no_hdr10plus = !self.opts.no_hdr10plus,
-            11 => self.opts.copy = !self.opts.copy,
-            12 => self.opts.shutdown = !self.opts.shutdown,
-            13 => self.opt_edit = Some(self.opts.output_dir.to_string_lossy().to_string()),
+            6 => self.opts.pl_eac3 = !self.opts.pl_eac3,
+            7 => self.opts.extra = !self.opts.extra,
+            8 => self.opts.denoise = !self.opts.denoise,
+            9 => self.opts.no_crop = !self.opts.no_crop,
+            10 => self.opts.no_dv = !self.opts.no_dv,
+            11 => self.opts.no_hdr10plus = !self.opts.no_hdr10plus,
+            12 => self.opts.copy = !self.opts.copy,
+            13 => self.opts.shutdown = !self.opts.shutdown,
+            14 => self.opt_edit = Some(self.opts.output_dir.to_string_lossy().to_string()),
             _ => {}
         }
     }

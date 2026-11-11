@@ -4,7 +4,7 @@
 
 <h1 align="center">VIDEOPIPELINE</h1>
 
-VideoPipeline kompresuje filmy do HEVC albo AV1 na karcie graficznej: NVIDIA (NVENC) albo Intel (QSV, na Linuksie
+VideoPipeline kompresuje filmy do HEVC, AV1 albo AVC (H.264) na karcie graficznej: NVIDIA (NVENC) albo Intel (QSV, na Linuksie
 zapasowo VAAPI). Działa na Linuksie i Windows. Ma interfejs terminalowy w stylu Midnight Commandera, a podany z plikami
 działa jako zwykłe polecenie do skryptów.
 
@@ -14,7 +14,8 @@ Więcej zrzutów: [galeria](#galeria).
 
 ## Do czego służy
 
-- **Kompresja nagrań i filmów** — materiał z aparatu, kamery czy płyt trafia do HEVC/AV1 i zajmuje kilka razy mniej miejsca.
+- **Kompresja nagrań i filmów** — materiał z aparatu, kamery czy płyt trafia do HEVC/AV1 i zajmuje kilka razy mniej miejsca;
+  AVC (H.264) — gdy liczy się zgodność ze starszymi urządzeniami.
 - **Zachowanie HDR** — HDR10 przechodzi bez zmian, a w HEVC także Dolby Vision (RPU) i HDR10+ (dynamiczne metadane).
 - **Porządkowanie ścieżek** — domyślnie zostaje tylko polskie audio; opcjonalnie angielskie audio i napisy PL/EN,
   polska ścieżka może zostać przekodowana do E-AC-3 192 kb/s.
@@ -28,8 +29,8 @@ Więcej zrzutów: [galeria](#galeria).
 |---|---|
 | Procesor | x86-64-v3 (AVX2, BMI2, FMA): Intel Haswell (4. gen. Core) / AMD Zen 1 lub nowszy |
 | System | Linux z glibc 2.41+ (np. CachyOS/Arch, Debian 13, Ubuntu 25.04) — AppImage i deb; Windows 10/11 x64 — .zip |
-| Karta NVIDIA | HEVC: GeForce GTX 10xx (Pascal) lub nowsza; AV1: RTX 40xx / 50xx. Sterownik 570 lub nowszy (`nvidia-smi` do monitora obciążenia) |
-| Karta Intel | HEVC: Core 7. gen. (Kaby Lake) lub nowszy; AV1: Arc (A/B), Core Ultra (Meteor Lake) lub nowszy |
+| Karta NVIDIA | AVC i HEVC: GeForce GTX 10xx (Pascal) lub nowsza; AV1: RTX 40xx / 50xx. Sterownik 570 lub nowszy (`nvidia-smi` do monitora obciążenia) |
+| Karta Intel | AVC i HEVC: Core 7. gen. (Kaby Lake) lub nowszy; AV1: Arc (A/B), Core Ultra (Meteor Lake) lub nowszy |
 | Sterowniki Intel | Linux: `intel-media-driver` (iHD, VA-API) i runtime oneVPL: `vpl-gpu-rt` (Tiger Lake i nowsze) albo `intel-media-sdk` (starsze); na Debianie `intel-media-va-driver-non-free` i `libmfx-gen1.2`; użytkownik w grupie `render`. Windows: aktualny sterownik grafiki Intel (zawiera runtime oneVPL) |
 | Miejsce na dysku | na wynik; przy Dolby Vision / HDR10+ także na pliki tymczasowe (rzędu rozmiaru wyniku) |
 
@@ -132,7 +133,7 @@ Długa nazwa zaznaczonego pliku, która nie mieści się w kolumnie, przewija si
 przy każdym rozmiarze okna.
 
 **F7 — opcje.** Wiersz „Kodek wideo” przełącza między działającymi w systemie kombinacjami kodeka i karty,
-np. `HEVC NVENC → AV1 NVENC → HEVC QSV`; pod listą widać, co wykryto. Pozostałe wiersze odpowiadają flagom z tabeli niżej.
+np. `HEVC NVENC → AV1 NVENC → AVC NVENC → HEVC QSV`; pod listą widać, co wykryto. Pozostałe wiersze odpowiadają flagom z tabeli niżej.
 
 **F9 — kodowanie.** Okno pokazuje postęp każdego pliku, prędkość, ETA, log i obciążenie sprzętu:
 
@@ -174,8 +175,9 @@ Przy starcie program wykrywa enkodery krótkim kodowaniem testowym (sama obecno�
 | Flaga | Działanie |
 |---|---|
 | `-av1` | AV1 zamiast HEVC (zawsze 10-bit; bez Dolby Vision i HDR10+) |
+| `-avc`, `--avc` | AVC (H.264) zamiast HEVC: profil High 8-bit, tylko źródła SDR (pliki HDR są pomijane z komunikatem — HDR bez mapowania tonów w 8 bitach wyglądałby źle); 10-bit SDR jest przeliczane do 8 bitów |
 | `--intel`, `--engine nvenc\|qsv\|vaapi` | wybór karty (wyżej) |
-| `-q N`, `--hevc-cq N`, `--av1-cq N` | jakość, 1–51, mniej = lepiej (domyślnie HEVC 19, AV1 25) |
+| `-q N`, `--hevc-cq N`, `--av1-cq N`, `--avc-cq N` | jakość, 1–51, mniej = lepiej (domyślnie HEVC 19, AV1 25, AVC 18 — AVC potrzebuje niższego CQ do podobnej jakości) |
 | `--qsv-preset P` | preset Intel QSV: `veryfast` … `veryslow` (domyślnie `slow`); `veryslow` na zintegrowanej grafice bywa kilka razy wolniejszy przy niewielkim zysku jakości |
 | `--container auto\|mkv\|mp4` | kontener wyniku (domyślnie jak źródło); w MP4 Dolby Vision i HDR10+ nie są pełne — do nich MKV |
 | `-pleac3` | polska ścieżka → E-AC-3 stereo 192 kb/s |
@@ -189,7 +191,9 @@ Przy starcie program wykrywa enkodery krótkim kodowaniem testowym (sama obecno�
 
 **Jakość.** Ta sama wartość CQ trafia do każdej karty: NVENC `-cq`, QSV `-global_quality` (ICQ), VAAPI `-qp` (CQP;
 dla AV1 przeliczone ×5 na skalę 0–255). Skale enkoderów nie są identyczne, więc ten sam CQ na różnych kartach daje
-podobną, ale nie taką samą jakość i rozmiar.
+podobną, ale nie taką samą jakość i rozmiar. AVC ma te same priorytety jakości co HEVC: na NVENC preset p7, tune hq, VBR z CQ,
+adaptacyjna kwantyzacja przestrzenna i czasowa, B-klatki referencyjne, pełny multipass, lookahead 32 klatek i CABAC;
+na Intelu profil High z ICQ (QSV) albo CQP (VAAPI).
 
 **Pliki wynikowe** trafiają do `~/Wideo` (zmiana w F7). Kontener domyślnie wynika ze źródła (`.mp4` → `.mp4`, wszystko
 inne → `.mkv`); w F7 albo `--container` można wymusić MKV lub MP4. Do MP4 audio w kodekach spoza MP4 (np. DTS,
@@ -201,7 +205,7 @@ z różnymi ustawieniami się nie nadpisują.
 te same dane), a okno analizy pokazuje postęp odczytu: procent, pozycję w filmie, prędkość i szacowany czas do końca.
 
 **Bez plików tymczasowych.** Gdy w źródle nie ma Dolby Vision ani HDR10+ (albo ich analiza jest wyłączona: `-pdv`, `-ph`),
-a także zawsze dla AV1, ffmpeg koduje wideo i od razu zapisuje plik wynikowy razem z audio (kopia, a E-AC-3 z `-pleac3`
+a także zawsze dla AV1 i AVC, ffmpeg koduje wideo i od razu zapisuje plik wynikowy razem z audio (kopia, a E-AC-3 z `-pleac3`
 / `-da` w locie) i napisami — bez pośrednich plików `.hevc`/`.eac3` i bez osobnego muksowania, więc dysk dostaje
 o połowę mniej zapisów. Do czasu ukończenia plik ma końcówkę `.part`. Z Dolby Vision / HDR10+ wideo przechodzi przez
 plik tymczasowy, bo metadane trzeba wstrzyknąć (dovi_tool, hdr10plus_tool) przed muksowaniem. Każdy plik pośredni

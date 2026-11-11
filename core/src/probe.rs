@@ -46,6 +46,13 @@ pub struct ColorProfile {
     pub sdr_range: String,
 }
 
+impl ColorProfile {
+    /// HDR (PQ / HLG) — w odróżnieniu od zwykłego 10-bit SDR.
+    pub fn is_hdr(&self) -> bool {
+        matches!(self.trc.as_str(), "smpte2084" | "arib-std-b67")
+    }
+}
+
 pub struct Media {
     pub audio: Vec<(u32, String)>,
     pub subs: Vec<(u32, String)>,
