@@ -268,7 +268,8 @@ Na komputerze z Windows paczki buduje się w WSL tym samym `./build-local.sh` (D
 Repozytorium trzymaj na systemie plików Linuksa — na dyskach Windows (`/mnt/c`, `/mnt/e`) git i build są wielokrotnie
 wolniejsze. Przy dual boocie można użyć repozytorium i cache z partycji Linuksa: `tools\wsl\mount-linux.cmd`
 (uruchamia się jako administrator) wyszukuje dyski z partycjami Linuksa, podłącza je do WSL, rozpoznaje system plików
-(ext4, btrfs, xfs, f2fs, LUKS) i montuje je w `/mnt/linux/<etykieta>`, a na końcu pokazuje znalezione repozytoria.
+(ext4, btrfs, xfs, f2fs) i montuje je przez sam WSL w `/mnt/wsl/PHYSICALDRIVE<n>p<m>` (widoczne we wszystkich
+sesjach), z dowiązaniami `/mnt/linux/<etykieta>`; na końcu pokazuje katalogi domowe i znalezione repozytoria.
 `tools\wsl\mount-linux.cmd -Unmount` odłącza dyski. Ograniczenia: WSL nie podłączy dysku, na którym jest Windows;
 podłączony dysk znika z Windows na czas montowania; Linux musi być zamknięty normalnie (nie hibernacja).
 
