@@ -2,7 +2,8 @@
 # Wysyła pliki BIEŻĄCEJ wersji z dist/ jako wydanie na GitHubie:  ./release.sh v0.16.0
 # Bierze tylko pliki z numerem wersji z tagu (starsze buildy leżące w dist/ są pomijane),
 # a tag musi zgadzać się z wersją w app/Cargo.toml.
-# Wymaga zalogowanego `gh` (gh auth login). Istniejące wydanie dostaje pliki podmienione (--clobber).
+# Wymaga zalogowanego `gh` (gh auth login). Istniejące wydanie dostaje pliki podmienione (--clobber),
+# a pliki innych wersji są z niego usuwane.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 TAG="${1:?podaj tag, np. ./release.sh v0.16.0}"
@@ -23,4 +24,10 @@ if gh release view "$TAG" >/dev/null 2>&1; then
 else
     gh release create "$TAG" "${FILES[@]}" --title "VideoPipeline $VER" --generate-notes
 fi
+# Wydanie ma zawierać tylko pliki tej wersji — usuń pozostałości innych (np. po zmianie tagu wydania).
+while read -r asset; do
+    [[ -z "$asset" || "$asset" == *"$VER"* ]] && continue
+    echo "Usuwam plik innej wersji: $asset"
+    gh release delete-asset "$TAG" "$asset" --yes
+done < <(gh release view "$TAG" --json assets --jq '.assets[].name')
 echo "Gotowe: $(gh release view "$TAG" --json url -q .url)"
